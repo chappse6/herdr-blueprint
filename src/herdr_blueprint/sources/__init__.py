@@ -1,1 +1,1 @@
-"""Where items come from: followed files and agent pushes."""
+"""Where items come from: the inbox agents write to."""

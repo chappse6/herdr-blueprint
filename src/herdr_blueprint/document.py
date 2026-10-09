@@ -1,12 +1,13 @@
 """Views for documents and diagrams. Mermaid is drawn with the active palette.
 
-termaid can take seconds on a big diagram, so drawing runs in a thread and the
-view shows a placeholder until it is done.
+Drawing happens only when the worker asks for it (the draw flag). termaid can
+take seconds on a big diagram, so it runs in a thread behind a placeholder.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 from functools import partial
 
 from rich.text import Text
@@ -20,6 +21,13 @@ from .diagram import DiagramError, render_diagram
 from .themes import palette_for_theme
 
 PLACEHOLDER = "Drawing diagram…"
+
+
+def as_code(source: str) -> str:
+    """Mermaid source as a fenced code block, shown as-is without drawing."""
+    longest = max((len(run) for run in re.findall(r"`+", source)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}mermaid\n{source}\n{fence}\n"
 
 
 def draw(app: App, source: str, max_width: int | None = None) -> Content:
@@ -78,9 +86,16 @@ class DiagramFence(MarkdownFence):
 
 
 class DocumentView(Markdown):
-    """Markdown with Mermaid fences drawn as diagrams."""
+    """Markdown. With draw_diagrams, Mermaid fences are drawn as diagrams."""
 
-    BLOCKS = {**Markdown.BLOCKS, "fence": DiagramFence}
+    def __init__(self, markdown: str, draw_diagrams: bool = False, **kwargs) -> None:
+        self.draw_diagrams = draw_diagrams
+        super().__init__(markdown, **kwargs)
+
+    def get_block_class(self, block_name: str):
+        if block_name == "fence" and self.draw_diagrams:
+            return DiagramFence
+        return super().get_block_class(block_name)
 
 
 class PlainView(Log):

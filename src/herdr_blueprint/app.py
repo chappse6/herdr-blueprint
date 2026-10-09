@@ -1,51 +1,45 @@
-"""The Blueprint viewer: header, document body, history tabs and key hints."""
+"""The Blueprint viewer: one screen showing the latest thing the worker sent."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
+from dataclasses import replace
 
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
-from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Footer, OptionList, Static
 from textual.widgets.option_list import Option
 
 from . import config as config_store
-from .document import DiagramView, DocumentView, PlainView
-from .history import History, Item, clean, is_large
-from .sources.follow import follow
-from .sources.inbox import watch_inbox
+from .document import DiagramView, DocumentView, PlainView, as_code
+from .item import Item, clean, is_large
+from .sources.inbox import Refresh, watch_inbox
 from .themes import PALETTES, get_palette, palette_for_theme
 
 WELCOME = """\
 # Blueprint
 
-Live Markdown and Mermaid for your agent's side pane.
-
-Save a `.md` or `.mmd` file in this workspace and it shows up here.
-Agents can also send a diagram with `herdr-blueprint draw`.
+The latest doc or diagram your agent sends shows up here.
 
 ```mermaid
 graph LR
-  A[Agent writes] --> B[Blueprint follows]
-  B --> C[You read it here]
+  A[Agent sends] --> B[Blueprint shows it]
+  B --> C[Next send replaces it]
 ```
+
+Add `--draw` to draw Mermaid. Without it, diagrams stay as text.
 
 | Key | Action |
 |---|---|
 | `t` | Change theme |
-| `←` `→` | Move through history |
-| `f` | Follow new files on or off |
 | `r` | Reload |
 | `q` | Quit |
 """
-
 
 # Below this width the header drops the brand and uses a short status.
 NARROW_WIDTH = 60
@@ -95,23 +89,17 @@ class BlueprintApp(App[None]):
     TITLE = "Blueprint"
     BINDINGS = [
         Binding("t", "pick_theme", "Theme"),
-        Binding("left", "back", "Back"),
-        Binding("right", "forward", "Next"),
-        Binding("f", "toggle_follow", "Follow"),
         Binding("r", "reload", "Reload"),
         Binding("q", "quit", "Quit"),
     ]
 
-    following = reactive(True)
-
-    def __init__(self, root: Path, settings: config_store.Config | None = None) -> None:
+    def __init__(self, settings: config_store.Config | None = None) -> None:
         super().__init__()
-        self.root = root
         self.settings = settings or config_store.load()
-        self.history = History()
+        self.current: Item | None = None
         self.notice: str | None = None
         self.title_text = "Welcome"
-        # Follow, inbox and keys all open items; one render at a time.
+        # Sends, refreshes and keys can overlap; one render at a time.
         self._render_lock = asyncio.Lock()
         for palette in PALETTES.values():
             self.register_theme(palette.textual_theme())
@@ -122,37 +110,24 @@ class BlueprintApp(App[None]):
             yield Static("", id="source")
             yield Static("", id="status")
         yield VerticalScroll(id="body")
-        yield Static("", id="tabs")
         yield Footer()
 
     async def on_mount(self) -> None:
         self.theme = get_palette(self.settings.theme).theme_name
-        self.following = self.settings.follow
-        await self._render_text(WELCOME, diagram=False)
+        # The welcome example is tiny and ours, so it is always drawn.
+        await self._render_text(WELCOME, diagram=False, draw=True, plain=False)
         self._update_status()
-        self.run_worker(self._follow_files(), exclusive=False, exit_on_error=False)
         self.run_worker(self._read_inbox(), exclusive=False, exit_on_error=False)
         self.set_interval(30, self._update_status)
 
-    # Sources ---------------------------------------------------------------
-
-    # A broken source must not close the viewer: say so in the header instead.
-
-    async def _follow_files(self) -> None:
-        try:
-            async for item in follow(self.root):
-                if self.following:
-                    await self.open_item(self.history.push(item))
-                else:
-                    self.history.push(item, focus=False)
-                    self._update_tabs()
-        except Exception as exc:
-            self._show_notice(f"Follow stopped: {exc}")
-
     async def _read_inbox(self) -> None:
+        # A broken inbox must not close the viewer: say so in the header instead.
         try:
-            async for item in watch_inbox():
-                await self.open_item(self.history.push(item))
+            async for message in watch_inbox():
+                if isinstance(message, Refresh):
+                    await self.refresh_current(draw=message.draw)
+                else:
+                    await self.open_item(message)
         except Exception as exc:
             self._show_notice(f"Inbox stopped: {exc}")
 
@@ -162,9 +137,8 @@ class BlueprintApp(App[None]):
 
     # Rendering -------------------------------------------------------------
 
-    async def open_item(self, item: Item | None) -> None:
-        if item is None:
-            return
+    async def open_item(self, item: Item) -> None:
+        """Replace the screen with `item`. The previous one is dropped."""
         async with self._render_lock:
             try:
                 text = item.read()
@@ -172,22 +146,32 @@ class BlueprintApp(App[None]):
                 # Keep the last content on screen; say what went wrong in the header.
                 self._show_notice(f"Cannot read {clean(item.title)}")
                 return
-            plain = not item.is_diagram and is_large(text)
+            drawn_diagram = item.is_diagram and item.draw
+            plain = not drawn_diagram and is_large(text)
             self.notice = "Large file, shown as plain text" if plain else None
-            await self._render_text(text, diagram=item.is_diagram, plain=plain)
+            await self._render_text(text, diagram=item.is_diagram, draw=item.draw, plain=plain)
+            self.current = item
             self.title_text = clean(item.title)
             self._update_status()
-            self._update_tabs()
 
-    async def _render_text(self, text: str, diagram: bool, plain: bool = False) -> None:
+    async def refresh_current(self, draw: bool) -> None:
+        """Re-read and redraw what is on screen, with the worker's draw flag."""
+        if self.current is not None:
+            await self.open_item(replace(self.current, draw=draw, at=time.time()))
+
+    async def _render_text(self, text: str, *, diagram: bool, draw: bool, plain: bool) -> None:
         body = self.query_one("#body", VerticalScroll)
         await body.remove_children()
         if plain:
             view = PlainView()
             await body.mount(view)
             await view.load(text)
+        elif diagram and draw:
+            await body.mount(DiagramView(text))
+        elif diagram:
+            await body.mount(DocumentView(as_code(text)))
         else:
-            await body.mount(DiagramView(text) if diagram else DocumentView(text))
+            await body.mount(DocumentView(text, draw_diagrams=draw))
         body.scroll_home(animate=False)
 
     def _update_status(self) -> None:
@@ -208,45 +192,18 @@ class BlueprintApp(App[None]):
             source.update(Text(f"⚠ {self.notice}", style=warning))
         else:
             source.update(Text(self.title_text))
-        item = self.history.current
         status = Text()
         if self.notice and not narrow:
-            status.append(f"⚠ {self.notice}   ", style=warning)
-        elif self.notice:
-            pass
-        elif item and narrow:
-            status.append(f"{ago(item.at).removesuffix(' ago').replace('just ', '')} ")
-        elif item:
-            origin = "saved" if item.sent_by == "follow" else f"from {item.sent_by}"
-            status.append(f"{origin} {ago(item.at)}   ")
-        if narrow:
-            status.append("◉" if self.following else "○")
-        else:
-            status.append("◉ follow" if self.following else "○ paused")
+            status.append(f"⚠ {self.notice}", style=warning)
+        elif self.current and narrow:
+            status.append(ago(self.current.at).removesuffix(" ago").replace("just ", ""))
+        elif self.current:
+            status.append(f"from {self.current.sent_by} {ago(self.current.at)}")
         status_bar.update(status)
 
     def on_resize(self) -> None:
         if self.is_mounted:
             self._update_status()
-
-    def _update_tabs(self) -> None:
-        palette = palette_for_theme(self.theme)
-        tabs = Text()
-        for i, item in enumerate(self.history.items):
-            if tabs:
-                tabs.append(" · ", style=palette.muted)
-            label = ("✎ " if item.kind == "mermaid" else "") + clean(item.title)
-            current = i == self.history.index
-            tabs.append(label, style=f"bold {palette.accent}" if current else palette.muted)
-        self.query_one("#tabs", Static).update(tabs)
-
-    def watch_following(self) -> None:
-        if self.is_mounted:
-            self._update_status()
-
-    def watch_theme(self) -> None:
-        if self.is_mounted:
-            self._update_tabs()
 
     # Actions ---------------------------------------------------------------
 
@@ -258,16 +215,6 @@ class BlueprintApp(App[None]):
 
         self.push_screen(ThemePicker(self.theme), chosen)
 
-    async def action_back(self) -> None:
-        await self.open_item(self.history.back())
-
-    async def action_forward(self) -> None:
-        await self.open_item(self.history.forward())
-
     async def action_reload(self) -> None:
-        await self.open_item(self.history.current)
-
-    def action_toggle_follow(self) -> None:
-        self.following = not self.following
-        self.settings.follow = self.following
-        config_store.save(self.settings)
+        if self.current is not None:
+            await self.open_item(self.current)

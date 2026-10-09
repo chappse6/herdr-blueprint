@@ -12,17 +12,25 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from platformdirs import user_state_dir
 from watchfiles import Change, awatch
 
-from ..history import Item
+from ..item import Item, looks_like_mermaid
 
 log = logging.getLogger("herdr_blueprint.inbox")
 
 # Messages older than this are dropped, so yesterday's diagram doesn't pop up today.
 MAX_AGE_SECONDS = 3600
+
+
+@dataclass(frozen=True)
+class Refresh:
+    """The worker asked to redraw what is on screen."""
+
+    draw: bool = False
 
 
 def inbox_dir(workspace: str | None = None) -> Path:
@@ -50,7 +58,7 @@ def _sent_at(data: dict, now: float) -> float:
         return now
 
 
-def receive(path: Path, now: float | None = None) -> Item | None:
+def receive(path: Path, now: float | None = None) -> Item | Refresh | None:
     """Claim, read and delete one message.
 
     The claim is a rename, so when two viewers race only one gets the message.
@@ -75,13 +83,19 @@ def receive(path: Path, now: float | None = None) -> Item | None:
     if now - at > MAX_AGE_SECONDS:
         log.info("Skipped old message %s", path.name)
         return None
+    kind = data.get("kind")
+    draw = data.get("draw") is True
     sent_by = str(data.get("sent_by", "agent"))
-    if data.get("kind") == "file" and data.get("path"):
+    if kind == "refresh":
+        return Refresh(draw=draw)
+    if kind == "file" and data.get("path"):
         file = Path(data["path"])
-        return Item(kind="file", title=file.name, path=file, sent_by=sent_by, at=at)
-    if data.get("kind") == "mermaid" and data.get("source"):
-        title = str(data.get("title") or "Diagram")
-        return Item(kind="mermaid", title=title, source=str(data["source"]), sent_by=sent_by, at=at)
+        return Item(kind="file", title=file.name, path=file, sent_by=sent_by, at=at, draw=draw)
+    if kind in ("text", "mermaid") and data.get("source"):
+        source = str(data["source"])
+        shape = "mermaid" if kind == "mermaid" or looks_like_mermaid(source) else "markdown"
+        title = str(data.get("title") or ("Diagram" if shape == "mermaid" else "Note"))
+        return Item(kind=shape, title=title, source=source, sent_by=sent_by, at=at, draw=draw)
     log.warning("Skipped unknown message %s", path.name)
     return None
 
@@ -90,13 +104,16 @@ def _pending(folder: Path) -> list[Path]:
     return sorted(p for p in folder.glob("*.json") if not p.name.startswith("."))
 
 
-async def watch_inbox(workspace: str | None = None) -> AsyncIterator[Item]:
-    """Yield messages already waiting, then each new one."""
+async def watch_inbox(workspace: str | None = None) -> AsyncIterator[Item | Refresh]:
+    """Yield the newest item already waiting, then each new message.
+
+    Older waiting items and refreshes are dropped: the viewer shows one thing.
+    """
     folder = inbox_dir(workspace)
     folder.mkdir(parents=True, exist_ok=True)
-    for path in _pending(folder):
-        if item := receive(path):
-            yield item
+    waiting = [item for path in _pending(folder) if isinstance(item := receive(path), Item)]
+    if waiting:
+        yield waiting[-1]
 
     # Some platforms report the final rename as "modified", so accept any non-delete.
     def keep(change: Change, raw: str) -> bool:
@@ -104,5 +121,5 @@ async def watch_inbox(workspace: str | None = None) -> AsyncIterator[Item]:
 
     async for _changes in awatch(folder, watch_filter=keep, debounce=50):
         for path in _pending(folder):
-            if item := receive(path):
-                yield item
+            if message := receive(path):
+                yield message

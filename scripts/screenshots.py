@@ -4,21 +4,27 @@ Run: uv run python scripts/screenshots.py
 """
 
 import asyncio
-import tempfile
 from pathlib import Path
 
 from herdr_blueprint.app import BlueprintApp
 from herdr_blueprint.config import Config
-from herdr_blueprint.history import Item
+from herdr_blueprint.item import Item
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "screenshots"
 FIXTURE = ROOT / "tests" / "fixtures" / "order-flow.md"
 
 
+async def drawings_done(app) -> None:
+    # An empty list would mean "wait for every worker", including the endless inbox one.
+    drawing = [worker for worker in app.workers if worker.group == "draw"]
+    if drawing:
+        await app.workers.wait_for_complete(drawing)
+
+
 async def open_fixture(pilot) -> None:
-    item = pilot.app.history.push(Item(kind="file", title="docs/order-flow.md", path=FIXTURE))
-    await pilot.app.open_item(item)
+    await pilot.app.open_item(Item(kind="file", title="docs/order-flow.md", path=FIXTURE, draw=True))
+    await drawings_done(pilot.app)
 
 
 async def open_picker(pilot) -> None:
@@ -27,7 +33,7 @@ async def open_picker(pilot) -> None:
 
 
 async def shoot(name: str, theme: str, action) -> None:
-    app = BlueprintApp(root=Path(tempfile.mkdtemp()), settings=Config(theme=theme, follow=True))
+    app = BlueprintApp(settings=Config(theme=theme))
     async with app.run_test(size=(76, 38)) as pilot:
         await pilot.pause(0.3)
         await action(pilot)

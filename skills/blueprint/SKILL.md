@@ -1,12 +1,13 @@
 ---
 name: blueprint
-description: Use when running inside a herdr pane (HERDR_ENV=1) with the Blueprint plugin and a diagram or document would explain things better than chat text — architecture, request flows, sequences, data models, state machines — or when the user asks to "draw", "show a diagram", "visualize", or "open this in Blueprint".
+description: Use when running inside a herdr pane (HERDR_ENV=1) with the Blueprint plugin and a diagram or document would explain things better than chat text — architecture, request flows, sequences, data models, state machines — or when the user asks to "draw", "show a diagram", "visualize", "open this in Blueprint", or "refresh Blueprint".
 ---
 
 # Blueprint
 
-Blueprint is a viewer in a herdr side pane. It draws Mermaid diagrams and Markdown
-in the terminal. Send it a diagram instead of drawing ASCII art in chat.
+Blueprint is a viewer in a herdr side pane. It shows one thing: the latest file
+or diagram you sent. Each send replaces the screen. Send a diagram instead of
+drawing ASCII art in chat.
 
 ## Commands
 
@@ -14,26 +15,37 @@ If `HERDR_ENV` is not `1`, skip this skill.
 
 ```bash
 root=$(herdr plugin list --json | jq -r '.result.plugins[] | select(.plugin_id == "seeun.blueprint") | .plugin_root')
+bp() { uv run --project "$root" --no-sync herdr-blueprint "$@"; }
 
-# A diagram you write now
-uv run --project "$root" --no-sync herdr-blueprint draw --title "Order flow" <<'EOF'
+# A diagram you write now: --draw makes Blueprint draw it
+bp send --draw --title "Order flow" <<'EOF2'
 sequenceDiagram
   Client->>API: POST /orders
   API->>DB: INSERT order
   API-->>Client: 201 Created
-EOF
+EOF2
 
-# A file that already exists (.md, .markdown, .mmd, .mermaid)
-uv run --project "$root" --no-sync herdr-blueprint show docs/design.md
+# A file (.md, .markdown, .mmd, .mermaid); add --draw if it holds Mermaid to draw
+bp show docs/design.md
+
+# You changed the file on screen: redraw it in place
+bp refresh --draw
 ```
 
 Empty `$root` means the plugin is not installed: tell the user to run
 `herdr plugin install chappse6/herdr-blueprint`.
 
+## When to use `--draw`
+
+- Use it when the point of the send is the diagram.
+- Leave it off for plain documents or when the user only wants the text; Mermaid
+  then shows as code, which is faster.
+- The flag belongs to each send or refresh.
+
 ## Writing diagrams
 
-- Keep the title short; it shows in the history bar.
-- Use plain Mermaid: `graph`/`flowchart`, `sequenceDiagram`, `erDiagram`,
-  `classDiagram`, `stateDiagram-v2` work best.
+- Keep the title short; it shows in the header.
+- Plain Mermaid works best: `graph`/`flowchart`, `sequenceDiagram`, `erDiagram`,
+  `classDiagram`, `stateDiagram-v2`. Keep diagrams under about 100 nodes.
 - Labels may use the user's language.
 - In chat, say in one line what you sent ("Sent the order flow to Blueprint").

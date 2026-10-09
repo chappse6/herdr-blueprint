@@ -40,12 +40,6 @@ DiagramView {
     padding: 1 0;
 }
 
-#tabs {
-    height: 1;
-    background: $surface;
-    padding: 0 1;
-}
-
 ThemePicker {
     align: center middle;
     background: $background 40%;

@@ -1,4 +1,4 @@
-"""Saved settings (theme, follow mode) in the user config folder."""
+"""Saved settings: only the theme. Everything else is gone when the viewer closes."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from .themes import DEFAULT_PALETTE
 @dataclass
 class Config:
     theme: str = DEFAULT_PALETTE
-    follow: bool = True
 
 
 def config_path() -> Path:
@@ -27,10 +26,9 @@ def load(path: Path | None = None) -> Config:
         data = json.loads((path or config_path()).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return Config()
-    return Config(
-        theme=str(data.get("theme", DEFAULT_PALETTE)),
-        follow=bool(data.get("follow", True)),
-    )
+    if not isinstance(data, dict):
+        return Config()
+    return Config(theme=str(data.get("theme", DEFAULT_PALETTE)))
 
 
 def save(config: Config, path: Path | None = None) -> None:

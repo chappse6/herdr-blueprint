@@ -1,4 +1,4 @@
-"""Recent items shown in the viewer, newest last."""
+"""What the viewer shows: one file or snippet the worker sent."""
 
 from __future__ import annotations
 
@@ -24,25 +24,46 @@ LARGE_DOC_LINES = 2_000
 # terminal as raw escape sequences.
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
+# First words of Mermaid diagrams; a snippet starting with one is a diagram.
+_MERMAID_STARTS = (
+    "graph", "flowchart", "sequenceDiagram", "classDiagram", "stateDiagram",
+    "erDiagram", "journey", "gantt", "pie", "quadrantChart", "requirementDiagram",
+    "gitGraph", "mindmap", "timeline", "sankey", "xychart", "block", "packet",
+    "kanban", "architecture", "zenuml", "C4Context", "C4Container", "C4Component",
+)
+
 
 def clean(text: str) -> str:
     """Normalize line endings and replace control characters with U+FFFD."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return _CONTROL.sub("\ufffd", text)
+    return _CONTROL.sub("�", text)
 
 
 def is_large(text: str) -> bool:
     return len(text) > LARGE_DOC_CHARS or text.count("\n") > LARGE_DOC_LINES
 
 
+def looks_like_mermaid(source: str) -> bool:
+    """True when the first line that is not blank or a %% comment opens a diagram."""
+    for line in source.splitlines():
+        words = line.split()
+        if not words or words[0].startswith("%%"):
+            continue
+        first = words[0]
+        return any(first == start or first.startswith(start + "-") for start in _MERMAID_STARTS)
+    return False
+
+
 @dataclass(frozen=True)
 class Item:
-    kind: Literal["file", "mermaid"]
+    kind: Literal["file", "mermaid", "markdown"]
     title: str
     path: Path | None = None
     source: str | None = None
-    sent_by: str = "follow"
+    sent_by: str = "agent"
     at: float = field(default_factory=time.time)
+    # Draw Mermaid with termaid. Off by default: drawing is the expensive part.
+    draw: bool = False
 
     @property
     def is_diagram(self) -> bool:
@@ -56,7 +77,7 @@ class Item:
         Bad bytes become U+FFFD and long files are cut, so odd files never
         crash the viewer. Documents get a notice; diagrams stay valid Mermaid.
         """
-        if self.kind == "mermaid":
+        if self.kind != "file":
             return clean(self.source or "")
         assert self.path is not None
         with self.path.open("rb") as handle:
@@ -65,39 +86,3 @@ class Item:
         if len(data) > MAX_BYTES and not self.is_diagram:
             text += f"\n\n> This file is large. Showing the first {MAX_BYTES:,} bytes.\n"
         return clean(text)
-
-
-class History:
-    """Back/forward list. Pushing a file that is already listed moves it to the end."""
-
-    def __init__(self, limit: int = 20) -> None:
-        self.limit = limit
-        self.items: list[Item] = []
-        self.index = -1
-
-    @property
-    def current(self) -> Item | None:
-        return self.items[self.index] if self.items else None
-
-    def push(self, item: Item, focus: bool = True) -> Item:
-        """Add an item. With focus=False the current item stays selected."""
-        previous = self.current
-        if item.path is not None:
-            self.items = [i for i in self.items if i.path != item.path]
-        self.items.append(item)
-        self.items = self.items[-self.limit :]
-        if focus or previous not in self.items:
-            self.index = len(self.items) - 1
-        else:
-            self.index = self.items.index(previous)
-        return item
-
-    def back(self) -> Item | None:
-        if self.index > 0:
-            self.index -= 1
-        return self.current
-
-    def forward(self) -> Item | None:
-        if self.index < len(self.items) - 1:
-            self.index += 1
-        return self.current

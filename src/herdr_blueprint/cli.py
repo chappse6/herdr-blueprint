@@ -9,70 +9,32 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .history import VIEWABLE_SUFFIXES
+from .item import VIEWABLE_SUFFIXES
 from .sources import inbox
 
 PLUGIN_ID = "seeun.blueprint"
 
-# The open action passes the workspace folder to the viewer pane in this variable.
-ROOT_ENV = "HERDR_BLUEPRINT_ROOT"
+DRAW_HELP = "draw Mermaid diagrams (slower; without it they stay as text)"
 
 
-def detect_root() -> Path:
-    """Workspace folder: HERDR_BLUEPRINT_ROOT, then the herdr plugin context, then cwd."""
-    env_root = os.environ.get(ROOT_ENV)
-    if env_root and Path(env_root).is_dir():
-        return Path(env_root)
-    context = os.environ.get("HERDR_PLUGIN_CONTEXT_JSON")
-    if context:
-        try:
-            data = json.loads(context)
-        except ValueError:
-            data = None
-        for key in ("foreground_cwd", "cwd"):
-            found = _find_key(data, key)
-            if found and Path(found).is_dir():
-                return Path(found)
-    return Path.cwd()
-
-
-def _find_key(data: object, key: str) -> str | None:
-    if isinstance(data, dict):
-        if isinstance(data.get(key), str):
-            return data[key]
-        values = data.values()
-    elif isinstance(data, list):
-        values = data
-    else:
-        return None
-    for value in values:
-        if found := _find_key(value, key):
-            return found
-    return None
-
-
-def focused_pane(herdr: str, pane_id: str | None, run=subprocess.run) -> tuple[str | None, Path | None]:
-    """Pane id and folder of `pane_id`, or of the focused pane when it is None."""
-    cmd = [herdr, "pane", "get", pane_id] if pane_id else [herdr, "pane", "current"]
+def focused_pane_id(herdr: str, pane_id: str | None, run=subprocess.run) -> str | None:
+    """`pane_id`, or the focused pane's id when it is None (None if herdr can't tell)."""
+    if pane_id:
+        return pane_id
     try:
         # herdr prints UTF-8; Windows would otherwise decode with the ANSI code page.
-        result = run(cmd, capture_output=True, encoding="utf-8", errors="replace")
+        result = run([herdr, "pane", "current"], capture_output=True, encoding="utf-8", errors="replace")
     except OSError:
-        return pane_id, None
+        return None
     if result.returncode != 0:
-        return pane_id, None
+        return None
     try:
-        pane = json.loads(result.stdout)["result"]["pane"]
+        return json.loads(result.stdout)["result"]["pane"]["pane_id"]
     except (ValueError, KeyError, TypeError):
-        return pane_id, None
-    for key in ("foreground_cwd", "cwd"):
-        folder = pane.get(key)
-        if folder and Path(folder).is_dir():
-            return pane.get("pane_id", pane_id), Path(folder)
-    return pane.get("pane_id", pane_id), None
+        return None
 
 
-def open_command(herdr: str, pane_id: str | None, root: Path | None) -> list[str]:
+def open_command(herdr: str, pane_id: str | None) -> list[str]:
     """herdr command that opens the viewer to the right without moving focus."""
     cmd = [
         herdr, "plugin", "pane", "open",
@@ -81,26 +43,7 @@ def open_command(herdr: str, pane_id: str | None, root: Path | None) -> list[str
     ]
     if pane_id:
         cmd += ["--target-pane", pane_id]
-    if root:
-        cmd += ["--env", f"{ROOT_ENV}={root}"]
     return cmd
-
-
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="herdr-blueprint",
-        description="Live Markdown and Mermaid viewer for the herdr side pane.",
-    )
-    parser.add_argument("--root", type=Path, help="folder to follow (default: workspace folder)")
-    commands = parser.add_subparsers(dest="command")
-    show = commands.add_parser("show", help="show a Markdown or Mermaid file in the viewer")
-    show.add_argument("path", type=Path)
-    draw = commands.add_parser("draw", help="send Mermaid from stdin to the viewer")
-    draw.add_argument("--title", default="Diagram", help="label in the history bar")
-    commands.add_parser("open", help="open the viewer pane in herdr")
-    commands.add_parser("install-skill", help="add the Blueprint skill to Claude Code and Codex")
-    commands.add_parser("uninstall-skill", help="remove the Blueprint skill")
-    return parser
 
 
 def read_stdin() -> str:
@@ -109,6 +52,26 @@ def read_stdin() -> str:
     if raw is None:
         return sys.stdin.read()
     return raw.read().decode("utf-8", errors="replace")
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="herdr-blueprint",
+        description="Live Markdown and Mermaid viewer for the herdr side pane.",
+    )
+    commands = parser.add_subparsers(dest="command")
+    show = commands.add_parser("show", help="show a Markdown or Mermaid file in the viewer")
+    show.add_argument("path", type=Path)
+    show.add_argument("--draw", action="store_true", help=DRAW_HELP)
+    send = commands.add_parser("send", help="send Markdown or Mermaid from stdin to the viewer")
+    send.add_argument("--title", default=None, help="label in the header")
+    send.add_argument("--draw", action="store_true", help=DRAW_HELP)
+    refresh = commands.add_parser("refresh", help="re-read and redraw what the viewer shows")
+    refresh.add_argument("--draw", action="store_true", help=DRAW_HELP)
+    commands.add_parser("open", help="open the viewer pane in herdr")
+    commands.add_parser("install-skill", help="add the Blueprint skill to Claude Code and Codex")
+    commands.add_parser("uninstall-skill", help="remove the Blueprint skill")
+    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -128,17 +91,22 @@ def main(argv: list[str] | None = None) -> int:
         if path.suffix.lower() not in VIEWABLE_SUFFIXES:
             print("herdr-blueprint: only .md, .markdown, .mmd and .mermaid files", file=sys.stderr)
             return 2
-        inbox.send({"kind": "file", "path": str(path), "sent_by": "agent"})
+        inbox.send({"kind": "file", "path": str(path), "draw": args.draw, "sent_by": "agent"})
         print(f"Sent to Blueprint: {path.name}")
         return 0
 
-    if args.command == "draw":
+    if args.command == "send":
         source = read_stdin().strip()
         if not source:
-            print("herdr-blueprint: no Mermaid on stdin", file=sys.stderr)
+            print("herdr-blueprint: nothing on stdin", file=sys.stderr)
             return 2
-        inbox.send({"kind": "mermaid", "source": source, "title": args.title, "sent_by": "agent"})
-        print(f"Sent to Blueprint: {args.title}")
+        inbox.send({"kind": "text", "source": source, "title": args.title, "draw": args.draw, "sent_by": "agent"})
+        print(f"Sent to Blueprint: {args.title or 'snippet'}")
+        return 0
+
+    if args.command == "refresh":
+        inbox.send({"kind": "refresh", "draw": args.draw})
+        print("Asked Blueprint to refresh")
         return 0
 
     if args.command in ("install-skill", "uninstall-skill"):
@@ -154,12 +122,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "open":
         herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
-        pane_id, root = focused_pane(herdr, os.environ.get("HERDR_PANE_ID"))
-        return subprocess.call(open_command(herdr, pane_id, root))
+        return subprocess.call(open_command(herdr, focused_pane_id(herdr, os.environ.get("HERDR_PANE_ID"))))
 
     from .app import BlueprintApp
 
-    BlueprintApp(root=(args.root or detect_root()).resolve()).run()
+    BlueprintApp().run()
     return 0
 
 
