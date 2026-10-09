@@ -11,16 +11,16 @@ drawing ASCII art in chat.
 
 ## Commands
 
-If `HERDR_ENV` is not `1`, skip this skill. Run the `root=` and `bp()` lines in
-the same shell command as each call: shell variables don't carry over between
-tool calls.
+If `HERDR_ENV` is not `1`, skip this skill. Run the `root=` and `blueprint()`
+lines in the same shell command as each call: shell variables don't carry over
+between tool calls.
 
 ```bash
 root=$(herdr plugin list --json | jq -r '.result.plugins[] | select(.plugin_id == "seeun.blueprint") | .plugin_root')
-bp() { uv run --project "$root" --no-sync herdr-blueprint "$@"; }
+blueprint() { uv run --project "$root" --no-sync herdr-blueprint "$@"; }
 
 # A diagram you write now: --draw makes Blueprint draw it
-bp send --draw --title "Order flow" <<'EOF2'
+blueprint send --draw --title "Order flow" <<'EOF2'
 sequenceDiagram
   Client->>API: POST /orders
   API->>DB: INSERT order
@@ -28,17 +28,17 @@ sequenceDiagram
 EOF2
 
 # Markdown works too: notes, tables, code, with Mermaid fences drawn by --draw
-bp send --title "Plan" <<'EOF2'
+blueprint send --title "Plan" <<'EOF2'
 # Plan
 - step one
 - step two
 EOF2
 
 # A file (.md, .markdown, .mmd, .mermaid); add --draw if it holds Mermaid to draw
-bp show docs/design.md
+blueprint show docs/design.md
 
 # You changed the file on screen: redraw it in place
-bp refresh --draw
+blueprint refresh --draw
 ```
 
 Empty `$root` means the plugin is not installed: tell the user to run
