@@ -51,30 +51,36 @@ def send(message: dict, workspace: str | None = None) -> Path:
     return final
 
 
-# The pane id of the viewer reading this inbox, so `open` can focus it instead of
-# opening a second one. Not .json, so it is never read as a message.
-VIEWER_FILE = "viewer.pane"
+# One file per running viewer, holding its pane id, so `open` can focus a viewer
+# instead of starting a second one. A folder rather than one shared file: a
+# viewer started by hand and closed again must not erase the side pane's record.
+VIEWERS_DIR = "viewers"
+
+
+def _viewer_record(pane_id: str, workspace: str | None) -> Path:
+    return inbox_dir(workspace) / VIEWERS_DIR / re.sub(r"[^A-Za-z0-9_.-]", "_", pane_id)
 
 
 def mark_viewer(pane_id: str, workspace: str | None = None) -> None:
-    folder = inbox_dir(workspace)
-    folder.mkdir(parents=True, exist_ok=True)
-    tmp = folder / f".{VIEWER_FILE}.{os.getpid()}.tmp"
-    tmp.write_text(pane_id, encoding="utf-8")
-    os.replace(tmp, folder / VIEWER_FILE)
+    record = _viewer_record(pane_id, workspace)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(pane_id, encoding="utf-8")
 
 
-def viewer_pane(workspace: str | None = None) -> str | None:
-    try:
-        return (inbox_dir(workspace) / VIEWER_FILE).read_text(encoding="utf-8").strip() or None
-    except OSError:
-        return None
+def viewer_panes(workspace: str | None = None) -> list[str]:
+    """Pane ids of the viewers that recorded themselves, newest first."""
+    dated = []
+    for record in (inbox_dir(workspace) / VIEWERS_DIR).glob("*"):
+        try:
+            dated.append((record.stat().st_mtime, record.read_text(encoding="utf-8").strip()))
+        except OSError:
+            continue  # cleared while listing
+    dated.sort(key=lambda pair: pair[0], reverse=True)
+    return [pane_id for _mtime, pane_id in dated if pane_id]
 
 
 def clear_viewer(pane_id: str, workspace: str | None = None) -> None:
-    """Forget the viewer, unless a newer one has taken its place."""
-    if viewer_pane(workspace) == pane_id:
-        (inbox_dir(workspace) / VIEWER_FILE).unlink(missing_ok=True)
+    _viewer_record(pane_id, workspace).unlink(missing_ok=True)
 
 
 def _sent_at(data: dict, now: float) -> float:

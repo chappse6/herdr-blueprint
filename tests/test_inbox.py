@@ -1,3 +1,4 @@
+import os
 import time
 
 from herdr_blueprint.item import Item
@@ -97,23 +98,28 @@ async def test_on_start_only_the_newest_waiting_item_is_shown():
     assert list(inbox.inbox_dir().glob("*.json")) == []
 
 
-# --- the open viewer ----------------------------------------------------------------
+# --- the open viewers ---------------------------------------------------------------
 
-def test_a_viewer_records_its_pane_and_clears_it_on_close():
-    assert inbox.viewer_pane() is None
+def test_each_viewer_records_itself_newest_first():
+    assert inbox.viewer_panes() == []
     inbox.mark_viewer("w1:pA")
-    assert inbox.viewer_pane() == "w1:pA"
-    inbox.clear_viewer("w1:pA")
-    assert inbox.viewer_pane() is None
-
-
-def test_closing_an_older_viewer_keeps_the_newer_record():
-    inbox.mark_viewer("w1:pA")
+    old = inbox.inbox_dir() / "viewers"
+    for record in old.iterdir():
+        os.utime(record, (1_000, 1_000))
     inbox.mark_viewer("w1:pB")
-    inbox.clear_viewer("w1:pA")
-    assert inbox.viewer_pane() == "w1:pB"
+    assert inbox.viewer_panes() == ["w1:pB", "w1:pA"]
 
 
-def test_the_viewer_record_is_not_a_message():
+def test_closing_a_second_viewer_keeps_the_first():
+    # A viewer started by hand in a shell must not make `open` forget the side pane.
+    inbox.mark_viewer("w1:pSide")
+    inbox.mark_viewer("w1:pShell")
+    inbox.clear_viewer("w1:pShell")
+    assert inbox.viewer_panes() == ["w1:pSide"]
+    inbox.clear_viewer("w1:pSide")
+    assert inbox.viewer_panes() == []
+
+
+def test_viewer_records_are_not_messages():
     inbox.mark_viewer("w1:pA")
     assert inbox._pending(inbox.inbox_dir()) == []

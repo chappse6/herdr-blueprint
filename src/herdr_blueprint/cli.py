@@ -50,12 +50,16 @@ def open_command(herdr: str, pane_id: str | None) -> list[str]:
     return cmd
 
 
-def viewer_command(herdr: str, pane_id: str | None, exists=pane.pane_exists) -> list[str]:
-    """Focus the viewer already open in this workspace, or open one next to `pane_id`."""
-    existing = inbox.viewer_pane()
-    if existing and exists(herdr, existing):
-        return [herdr, "plugin", "pane", "focus", existing]
-    return open_command(herdr, pane_id)
+def open_viewer(herdr: str, pane_id: str | None, run=subprocess.run, exists=pane.pane_exists) -> int:
+    """Focus a viewer already open in this workspace, or open one next to `pane_id`."""
+    for existing in inbox.viewer_panes():
+        if not exists(herdr, existing):
+            inbox.clear_viewer(existing)  # its pane was closed without cleanup
+            continue
+        # Fails for a viewer run by hand in a shell pane: that is not a plugin pane.
+        if run([herdr, "plugin", "pane", "focus", existing]).returncode == 0:
+            return 0
+    return run(open_command(herdr, pane_id)).returncode
 
 
 def read_stdin() -> str:
@@ -134,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
 
     herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
     if args.command == "open":
-        return subprocess.call(viewer_command(herdr, focused_pane_id(herdr, os.environ.get("HERDR_PANE_ID"))))
+        return open_viewer(herdr, focused_pane_id(herdr, os.environ.get("HERDR_PANE_ID")))
 
     from .app import BlueprintApp
 
