@@ -11,7 +11,9 @@ drawing ASCII art in chat.
 
 ## Commands
 
-If `HERDR_ENV` is not `1`, skip this skill.
+If `HERDR_ENV` is not `1`, skip this skill. Run the `root=` and `bp()` lines in
+the same shell command as each call: shell variables don't carry over between
+tool calls.
 
 ```bash
 root=$(herdr plugin list --json | jq -r '.result.plugins[] | select(.plugin_id == "seeun.blueprint") | .plugin_root')
@@ -23,6 +25,13 @@ sequenceDiagram
   Client->>API: POST /orders
   API->>DB: INSERT order
   API-->>Client: 201 Created
+EOF2
+
+# Markdown works too: notes, tables, code, with Mermaid fences drawn by --draw
+bp send --title "Plan" <<'EOF2'
+# Plan
+- step one
+- step two
 EOF2
 
 # A file (.md, .markdown, .mmd, .mermaid); add --draw if it holds Mermaid to draw

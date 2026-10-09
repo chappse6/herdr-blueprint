@@ -52,6 +52,8 @@ description = "open Blueprint"
 
 | Key | Action |
 |---|---|
+| `h` `j` `k` `l` | Move left, down, up, right |
+| `g` `G` | Top, bottom |
 | `t` | Change theme |
 | `r` | Reload |
 | `q` | Quit |

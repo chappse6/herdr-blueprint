@@ -13,6 +13,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Footer, OptionList, Static
+from textual.widgets.markdown import MarkdownFence
 from textual.widgets.option_list import Option
 
 from . import config as config_store
@@ -37,6 +38,8 @@ Add `--draw` to draw Mermaid. Without it, diagrams stay as text.
 
 | Key | Action |
 |---|---|
+| `h` `j` `k` `l` | Move left, down, up, right |
+| `g` `G` | Top, bottom |
 | `t` | Change theme |
 | `r` | Reload |
 | `q` | Quit |
@@ -44,6 +47,9 @@ Add `--draw` to draw Mermaid. Without it, diagrams stay as text.
 
 # Below this width the header drops the brand and uses a short status.
 NARROW_WIDTH = 60
+
+# Columns moved by one h or l press.
+SIDE_STEP = 4
 
 
 def ago(at: float, now: float | None = None) -> str:
@@ -89,6 +95,13 @@ class BlueprintApp(App[None]):
     CSS_PATH = "app.tcss"
     TITLE = "Blueprint"
     BINDINGS = [
+        # vim-style movement; the footer shows them as one "hjkl Move" hint.
+        Binding("j", "move(0, 1)", "Move", key_display="hjkl"),
+        Binding("k", "move(0, -1)", show=False),
+        Binding("h", "move(-1, 0)", show=False),
+        Binding("l", "move(1, 0)", show=False),
+        Binding("g", "jump(False)", show=False),
+        Binding("G", "jump(True)", show=False),
         Binding("t", "pick_theme", "Theme"),
         Binding("r", "reload", "Reload"),
         Binding("q", "quit", "Quit"),
@@ -228,6 +241,34 @@ class BlueprintApp(App[None]):
                 config_store.save(self.settings)
 
         self.push_screen(ThemePicker(self.theme), chosen)
+
+    def action_move(self, dx: int, dy: int) -> None:
+        """Scroll like vim: j/k one line, h/l a few columns."""
+        plain = self.query(PlainView)
+        if plain:
+            plain.first().scroll_relative(x=dx * SIDE_STEP, y=dy, animate=False)
+            return
+        body = self.query_one("#body", VerticalScroll)
+        if dy:
+            body.scroll_relative(y=dy, animate=False)
+        if not dx:
+            return
+        if body.max_scroll_x > 0:
+            body.scroll_relative(x=dx * SIDE_STEP, animate=False)
+            return
+        # Inside a document, wide diagrams and code scroll in their own blocks.
+        for fence in self.query(MarkdownFence):
+            if fence.max_scroll_x > 0:
+                fence.scroll_relative(x=dx * SIDE_STEP, animate=False)
+
+    def action_jump(self, end: bool) -> None:
+        """g to the top, G to the bottom."""
+        plain = self.query(PlainView)
+        target = plain.first() if plain else self.query_one("#body", VerticalScroll)
+        if end:
+            target.scroll_end(animate=False)
+        else:
+            target.scroll_home(animate=False)
 
     async def action_reload(self) -> None:
         async with self._render_lock:

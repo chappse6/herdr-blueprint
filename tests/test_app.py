@@ -429,3 +429,88 @@ async def test_a_drawn_diagram_over_the_limit_shows_as_text_without_freezing():
         assert gap < 0.5
         assert not app.query(DiagramView)
         assert "too large to draw" in str(app.query_one("#status").render())
+
+
+# --- vim keys ---------------------------------------------------------------------------
+
+LONG_DOC = "# Long\n\n" + "\n\n".join(f"Paragraph {i}" for i in range(80))
+
+
+async def test_j_and_k_scroll_the_page():
+    app = make_app()
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="markdown", title="Long", source=LONG_DOC))
+        await pilot.pause()
+        body = app.query_one("#body")
+        await pilot.press("j", "j", "j")
+        await pilot.pause()
+        assert body.scroll_y == 3
+        await pilot.press("k")
+        await pilot.pause()
+        assert body.scroll_y == 2
+
+
+async def test_g_and_shift_g_jump_to_top_and_bottom():
+    app = make_app()
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="markdown", title="Long", source=LONG_DOC))
+        await pilot.pause()
+        body = app.query_one("#body")
+        await pilot.press("G")
+        await pilot.pause()
+        assert body.scroll_y == body.max_scroll_y > 0
+        await pilot.press("g")
+        await pilot.pause()
+        assert body.scroll_y == 0
+
+
+async def test_h_and_l_scroll_a_wide_diagram():
+    app = make_app()
+    async with app.run_test(size=(50, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="mermaid", title="Wide", source=WIDE, draw=True))
+        await drawings_done(app)
+        await pilot.pause()
+        body = app.query_one("#body")
+        await pilot.press("l", "l")
+        await pilot.pause()
+        assert body.scroll_x > 0
+        await pilot.press("h", "h")
+        await pilot.pause()
+        assert body.scroll_x == 0
+
+
+async def test_h_and_l_scroll_wide_diagrams_inside_a_document():
+    app = make_app()
+    async with app.run_test(size=(50, 30)) as pilot:
+        await pilot.pause()
+        doc = f"# Flow\n\n```mermaid\n{WIDE}```\n"
+        await app.open_item(Item(kind="markdown", title="Doc", source=doc, draw=True))
+        await drawings_done(app)
+        await pilot.pause()
+        fence = app.query_one(DiagramFence)
+        await pilot.press("l")
+        await pilot.pause()
+        assert fence.scroll_x > 0
+
+
+async def test_j_scrolls_the_plain_view(tmp_path):
+    big = "# Log\n\n" + "\n".join(f"line {i}" for i in range(3000))
+    app = make_app()
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="markdown", title="big", source=big))
+        await pilot.pause()
+        await pilot.press("j", "j")
+        await pilot.pause()
+        assert app.query_one(PlainView).scroll_y == 2
+
+
+async def test_the_footer_shows_the_move_keys():
+    app = make_app()
+    async with app.run_test(size=(80, 20)) as pilot:
+        await pilot.pause()
+        shown = [b for b in app.BINDINGS if b.show]
+        assert any(b.key_display == "hjkl" for b in shown)

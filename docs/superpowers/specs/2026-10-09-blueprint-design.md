@@ -49,7 +49,7 @@ the terminal, and replaces it when the next one arrives. No browser, no images.
 │   │   Auth filter   │                     │
 │   └─────────────────┘                     │
 ├───────────────────────────────────────────┤
-│ t Theme   r Reload   q Quit               │
+│ hjkl Move  t Theme  r Reload  q Quit      │
 ╰───────────────────────────────────────────╯
 ```
 
@@ -63,6 +63,8 @@ the terminal, and replaces it when the next one arrives. No browser, no images.
 
 | Key | Action |
 |---|---|
+| `h` `j` `k` `l` | Move like vim; `h`/`l` scroll a wide diagram sideways |
+| `g` `G` | Top, bottom |
 | `t` | Theme picker (live preview, `Enter` keeps, `Esc` cancels) |
 | `r` | Reload what is shown |
 | `q` | Quit |
@@ -79,7 +81,8 @@ the terminal, and replaces it when the next one arrives. No browser, no images.
 
 `--draw` belongs to each request: a refresh without it shows Mermaid as text
 again. A snippet whose first line opens a Mermaid diagram (`graph`,
-`sequenceDiagram`, `erDiagram`, …) is a diagram; anything else is Markdown.
+`sequenceDiagram`, `erDiagram`, …), after optional front matter, `%%` lines
+and a byte order mark, is a diagram; anything else is Markdown.
 
 ## Architecture
 
