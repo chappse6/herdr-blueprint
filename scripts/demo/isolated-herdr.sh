@@ -11,6 +11,10 @@ cp "$HERE/zshrc" "$DEMO/zsh/.zshrc"
 for name in $(env | sed -n -E 's/^((HERDR_|CLAUDE|CODEX_)[A-Z_]*|AI_AGENT)=.*/\1/p'); do
   unset "$name"
 done
+# Drop any virtualenv (e.g. from `uv run`), so plugins run in their own .venv.
+unset VIRTUAL_ENV
+PATH=$(printf %s "$PATH" | tr ':' '\n' | grep -v '/\.venv/bin$' | paste -sd: -)
+export PATH
 export XDG_CONFIG_HOME="$DEMO" XDG_STATE_HOME="$DEMO/state" ZDOTDIR="$DEMO/zsh"
 export TERM=xterm-256color COLORTERM=truecolor
 exec "$@"
