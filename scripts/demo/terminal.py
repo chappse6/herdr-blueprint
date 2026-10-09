@@ -3,7 +3,9 @@
 Usage: python terminal.py OUT_DIR COLS ROWS -- command...
 
 Every half second OUT_DIR/screen.json (cells with colors) and screen.txt are
-rewritten. Create OUT_DIR/stop to end. Used to capture herdr for the README.
+rewritten. While OUT_DIR/record exists, every change is also kept as
+OUT_DIR/frames/<milliseconds>.json, for animations. Create OUT_DIR/stop to end.
+Used to capture herdr for the README.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import fcntl
 import json
 import os
 import pty
+import re
 import select
 import struct
 import sys
@@ -20,6 +23,11 @@ import time
 from pathlib import Path
 
 import pyte
+
+
+# Keyboard protocol switches (CSI > 1 u, CSI < u, ...): pyte doesn't know them
+# and would print their tail as text.
+KEYBOARD_MODES = re.compile(rb"\x1b\[[<>=?][0-9;]*u")
 
 
 class Screen(pyte.Screen):
@@ -54,18 +62,26 @@ def main() -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     screen.write_process_input = lambda data: os.write(fd, data.encode())
 
-    last = 0.0
+    frames = out / "frames"
+    last = last_frame = 0.0
     while not (out / "stop").exists():
-        ready, _, _ = select.select([fd], [], [], 0.1)
+        ready, _, _ = select.select([fd], [], [], 0.05)
         if ready:
             try:
-                stream.feed(os.read(fd, 65536))
+                stream.feed(KEYBOARD_MODES.sub(b"", os.read(fd, 65536)))
             except OSError:
                 break
-        if time.time() - last > 0.5:
+        now = time.time()
+        # Up to ten frames a second, only when something on screen changed.
+        if screen.dirty and now - last_frame >= 0.1 and (out / "record").exists():
+            frames.mkdir(exist_ok=True)
+            (frames / f"{int(now * 1000)}.json").write_text(json.dumps(snapshot(screen)))
+            screen.dirty.clear()
+            last_frame = now
+        if now - last > 0.5:
             (out / "screen.json").write_text(json.dumps(snapshot(screen)))
             (out / "screen.txt").write_text("\n".join(line.rstrip() for line in screen.display))
-            last = time.time()
+            last = now
     os.kill(pid, 15)
 
 

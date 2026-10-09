@@ -16,9 +16,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/herdr-demo.png" alt="herdr with Claude Code on the left explaining a login flow and Blueprint on the right drawing it as a sequence diagram">
+  <img src="docs/screenshots/herdr-demo.gif" alt="Claude Code is asked to explain a login flow, and seconds later Blueprint draws it as a sequence diagram next to the chat">
   <br>
-  <sub>Claude Code explains a login flow. Blueprint draws it next to the chat.</sub>
+  <sub>Ask your agent to explain something. Blueprint draws it next to the chat. (<a href="docs/screenshots/herdr-demo.mp4">MP4</a>)</sub>
 </p>
 
 Blueprint is a [herdr](https://herdr.dev) plugin. Put it next to your coding
@@ -34,6 +34,10 @@ in your terminal with colors that match your theme.
   from that folder.
 - **Themes.** Press `t` to pick a theme. Only your theme is saved.
 - **Runs everywhere.** macOS, Linux and Windows. No browser, no images.
+
+<p align="center">
+  <img src="docs/screenshots/herdr-demo.png" alt="herdr with Claude Code on the left explaining a login flow and Blueprint on the right drawing it as a sequence diagram">
+</p>
 
 ## Next to your agent
 

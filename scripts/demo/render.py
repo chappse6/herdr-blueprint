@@ -63,26 +63,32 @@ def to_text(rows: list[list[list]], crop: tuple[int, int, int, int] | None) -> T
     return text
 
 
+def to_svg(rows: list[list[list]], title: str = "herdr", crop: tuple[int, int, int, int] | None = None) -> str:
+    """A snapshot as a framed terminal SVG with local fonts."""
+    width = crop[2] if crop else len(rows[0])
+    console = Console(record=True, width=width, file=io.StringIO(), color_system="truecolor", force_terminal=True)
+    console.print(to_text(rows, crop), soft_wrap=True)
+    return local_fonts(console.export_svg(title=title, theme=ROSE_PINE))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("screen", type=Path)
     parser.add_argument("out", type=Path)
     parser.add_argument("--title", default="herdr")
     parser.add_argument("--crop", default=None, help="X,Y,W,H in cells")
+    parser.add_argument("--zoom", type=float, default=2, help="PNG scale")
+    parser.add_argument("--no-svg", action="store_true", help="write only the PNG")
     args = parser.parse_args()
 
     rows = json.loads(args.screen.read_text())
     crop = tuple(int(n) for n in args.crop.split(",")) if args.crop else None
-    text = to_text(rows, crop)
-    width = crop[2] if crop else len(rows[0])
-
-    console = Console(record=True, width=width, file=io.StringIO(), color_system="truecolor", force_terminal=True)
-    console.print(text, soft_wrap=True)
-    svg = local_fonts(console.export_svg(title=args.title, theme=ROSE_PINE))
+    svg = to_svg(rows, args.title, crop)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.with_suffix(".svg").write_text(svg, encoding="utf-8")
-    write_png(svg, args.out.with_suffix(".png"))
+    if not args.no_svg:
+        args.out.with_suffix(".svg").write_text(svg, encoding="utf-8")
+    write_png(svg, args.out.with_suffix(".png"), zoom=args.zoom)
     print(args.out.with_suffix(".png"))
 
 

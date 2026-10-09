@@ -18,7 +18,7 @@ def local_fonts(svg: str) -> str:
     return svg.replace("font-family: arial", "font-family: Menlo")
 
 
-def write_png(svg: str, png: Path) -> None:
+def write_png(svg: str, png: Path, zoom: float = 2) -> None:
     """Box-drawing lines look dashed when GitHub scales an SVG down; a PNG doesn't."""
-    data = resvg_py.svg_to_bytes(svg_string=svg, zoom=2, font_family=FONT, monospace_family=FONT)
+    data = resvg_py.svg_to_bytes(svg_string=svg, zoom=zoom, font_family=FONT, monospace_family=FONT)
     png.write_bytes(bytes(data))

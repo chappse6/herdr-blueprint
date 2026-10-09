@@ -10,6 +10,8 @@ browser and no screen recording permission are involved.
 - `terminal.py`: runs a command in a virtual terminal (pyte) and keeps a
   snapshot of the screen with colors.
 - `render.py`: turns a snapshot into a framed SVG and a 2x PNG.
+- `animate.py`: turns recorded frames into a GIF and an MP4, with the agent's
+  work squeezed into a few seconds.
 
 ## Steps
 
@@ -44,7 +46,19 @@ uv run python scripts/demo/render.py hero.json docs/screenshots/herdr-demo
 uv run python scripts/demo/render.py start.json docs/screenshots/start-screen --title Blueprint --crop 96,1,104,51
 uv run python scripts/demo/render.py picker.json docs/screenshots/file-picker --title Blueprint --crop 96,1,104,51
 
-# 4. Clean up.
+# 4. The animation: record frames while you type the prompt and the agent works.
+#    Start fresh: quit claude and run it again, and reopen Blueprint (q, then
+#    `dh plugin action invoke seeun.blueprint.open`) so it shows its start screen.
+dh pane focus --pane w1:p2 --direction left       # type into Claude Code
+touch "$OUT/record"; sleep 2
+python3 -c 'import subprocess, time
+for c in "Explain the login flow in Blueprint":
+    subprocess.run(["scripts/demo/isolated-herdr.sh", "herdr", "pane", "send-text", "w1:p1", c]); time.sleep(0.06)'
+python3 -c 'import time; print(time.time())' > enter.txt; dh pane send-keys w1:p1 enter
+sleep 4; dh agent wait w1:p1 --timeout 600000; sleep 3; rm "$OUT/record"
+uv run python scripts/demo/animate.py "$OUT/frames" "$(cat enter.txt)" docs/screenshots/herdr-demo
+
+# 5. Clean up.
 touch "$OUT/stop"; dh server stop; rm -rf ~/code/tollgate ~/.cache/blueprint-demo
 ```
 
