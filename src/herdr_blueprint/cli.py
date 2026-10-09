@@ -14,9 +14,15 @@ from .sources import inbox
 
 PLUGIN_ID = "seeun.blueprint"
 
+# The open action passes the workspace folder to the viewer pane in this variable.
+ROOT_ENV = "HERDR_BLUEPRINT_ROOT"
+
 
 def detect_root() -> Path:
-    """Workspace folder: the focused pane's folder when started by herdr, else cwd."""
+    """Workspace folder: HERDR_BLUEPRINT_ROOT, then the herdr plugin context, then cwd."""
+    env_root = os.environ.get(ROOT_ENV)
+    if env_root and Path(env_root).is_dir():
+        return Path(env_root)
     context = os.environ.get("HERDR_PLUGIN_CONTEXT_JSON")
     if context:
         try:
@@ -43,6 +49,40 @@ def _find_key(data: object, key: str) -> str | None:
         if found := _find_key(value, key):
             return found
     return None
+
+
+def focused_pane(herdr: str, pane_id: str | None, run=subprocess.run) -> tuple[str | None, Path | None]:
+    """Pane id and folder of `pane_id`, or of the focused pane when it is None."""
+    cmd = [herdr, "pane", "get", pane_id] if pane_id else [herdr, "pane", "current"]
+    try:
+        result = run(cmd, capture_output=True, text=True)
+    except OSError:
+        return pane_id, None
+    if result.returncode != 0:
+        return pane_id, None
+    try:
+        pane = json.loads(result.stdout)["result"]["pane"]
+    except (ValueError, KeyError, TypeError):
+        return pane_id, None
+    for key in ("foreground_cwd", "cwd"):
+        folder = pane.get(key)
+        if folder and Path(folder).is_dir():
+            return pane.get("pane_id", pane_id), Path(folder)
+    return pane.get("pane_id", pane_id), None
+
+
+def open_command(herdr: str, pane_id: str | None, root: Path | None) -> list[str]:
+    """herdr command that opens the viewer to the right without moving focus."""
+    cmd = [
+        herdr, "plugin", "pane", "open",
+        "--plugin", PLUGIN_ID, "--entrypoint", "viewer",
+        "--placement", "split", "--direction", "right", "--no-focus",
+    ]
+    if pane_id:
+        cmd += ["--target-pane", pane_id]
+    if root:
+        cmd += ["--env", f"{ROOT_ENV}={root}"]
+    return cmd
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -86,8 +126,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "open":
         herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
-        cmd = [herdr, "plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "viewer"]
-        return subprocess.call(cmd)
+        pane_id, root = focused_pane(herdr, os.environ.get("HERDR_PANE_ID"))
+        return subprocess.call(open_command(herdr, pane_id, root))
 
     from .app import BlueprintApp
 

@@ -45,6 +45,10 @@ graph LR
 """
 
 
+# Below this width the header drops the brand and uses a short status.
+NARROW_WIDTH = 60
+
+
 def ago(at: float, now: float | None = None) -> str:
     seconds = max(0, int((time.time() if now is None else now) - at))
     if seconds < 60:
@@ -164,16 +168,29 @@ class BlueprintApp(App[None]):
         body.scroll_home(animate=False)
 
     def _update_status(self) -> None:
+        # Side panes are often ~40 columns: keep the title readable by
+        # hiding the brand and shortening the status.
+        narrow = self.size.width < NARROW_WIDTH
+        self.query_one("#brand", Static).display = not narrow
         palette = palette_for_theme(self.theme)
         item = self.history.current
         status = Text()
         if self.notice:
-            status.append(f"⚠ {self.notice}   ", style=f"bold {palette.warning}")
+            status.append("⚠ " if narrow else f"⚠ {self.notice}   ", style=f"bold {palette.warning}")
+        elif item and narrow:
+            status.append(f"{ago(item.at).removesuffix(' ago').replace('just ', '')} ")
         elif item:
             origin = "saved" if item.sent_by == "follow" else f"from {item.sent_by}"
             status.append(f"{origin} {ago(item.at)}   ")
-        status.append("◉ follow" if self.following else "○ paused")
+        if narrow:
+            status.append("◉" if self.following else "○")
+        else:
+            status.append("◉ follow" if self.following else "○ paused")
         self.query_one("#status", Static).update(status)
+
+    def on_resize(self) -> None:
+        if self.is_mounted:
+            self._update_status()
 
     def _update_tabs(self) -> None:
         palette = palette_for_theme(self.theme)

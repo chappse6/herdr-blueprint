@@ -98,8 +98,9 @@ Boundaries:
 Workspace root, first match wins:
 
 1. `--root PATH` on the command line.
-2. The focused pane's `foreground_cwd`, then `cwd`, from `HERDR_PLUGIN_CONTEXT_JSON`.
-3. The current directory.
+2. `HERDR_BLUEPRINT_ROOT`, set by the `open` action from the focused pane's folder.
+3. The focused pane's `foreground_cwd`, then `cwd`, from `HERDR_PLUGIN_CONTEXT_JSON`.
+4. The current directory.
 
 ### Agent push
 

@@ -72,3 +72,23 @@ async def test_notice_clears_after_a_good_file(tmp_path):
         await app.open_item(Item(kind="file", title="good.md", path=good))
         assert app.notice is None
         assert "Cannot read" not in str(app.query_one("#status").render())
+
+
+async def test_header_keeps_title_readable_in_a_narrow_pane(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(40, 20)) as pilot:
+        await pilot.pause()
+        await app.open_item(app.history.push(Item(kind="mermaid", title="Live check", source="graph LR\n  A --> B", sent_by="agent")))
+        await pilot.pause()
+        assert app.query_one("#source").size.width >= len("Live check")
+        assert "◉" in str(app.query_one("#status").render())
+
+
+async def test_header_shows_full_status_in_a_wide_pane(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 20)) as pilot:
+        await pilot.pause()
+        await app.open_item(app.history.push(Item(kind="mermaid", title="Live check", source="graph LR\n  A --> B", sent_by="agent")))
+        await pilot.pause()
+        assert "from agent just now" in str(app.query_one("#status").render())
+        assert app.query_one("#brand").display
