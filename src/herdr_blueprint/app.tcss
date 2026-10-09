@@ -29,6 +29,14 @@ Screen {
 #body {
     padding: 1 2;
     background: $background;
+    /* A diagram wider than the pane scrolls sideways instead of being cut. */
+    overflow-x: auto;
+}
+
+/* Textual hides fence scrollbars; show one when a diagram or code line overflows. */
+MarkdownFence {
+    overflow-x: auto;
+    scrollbar-size-horizontal: 1;
 }
 
 DocumentView {

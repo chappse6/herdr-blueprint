@@ -8,6 +8,7 @@ from rich.cells import cell_len
 from rich.text import Text
 from termaid import render_rich
 from termaid.renderer import themes as termaid_themes
+from termaid.renderer.canvas import Canvas
 
 from .themes import PALETTES, Palette
 
@@ -44,6 +45,20 @@ def _register(palette: Palette) -> None:
 
 for _palette in PALETTES.values():
     _register(_palette)
+
+
+_cell_pairs = Canvas.to_styled_pairs
+
+
+def _char_pairs(canvas: Canvas) -> list[list[tuple[str, str]]]:
+    # termaid puts an empty shadow cell after each wide (CJK) character, joins
+    # the characters without it, then styles by cell index, so every style after
+    # a wide character lands one letter late. Dropping the shadow cells keeps
+    # one (char, style) pair per character. Only termaid's Rich output calls this.
+    return [[(ch, key) for ch, key in row if ch != ""] for row in _cell_pairs(canvas)]
+
+
+Canvas.to_styled_pairs = _char_pairs
 
 
 @lru_cache(maxsize=64)

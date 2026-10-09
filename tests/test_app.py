@@ -338,3 +338,61 @@ async def test_two_opens_at_once_leave_one_view(tmp_path):
         await pilot.pause()
         assert len(body_views(app)) == 1
         assert str(app.query_one("#source").render()) == "B"
+
+
+# --- wide diagrams --------------------------------------------------------------------
+
+WIDE = (
+    "sequenceDiagram\n"
+    "  participant A as Customer\n  participant B as Gateway\n  participant C as OrderService\n"
+    "  participant D as Inventory\n  participant E as PaymentProvider\n"
+    "  A->>B: place order\n  B->>C: create order\n  C->>D: reserve stock\n  C->>E: charge card\n"
+)
+
+
+async def test_a_wide_diagram_gets_a_horizontal_scrollbar():
+    app = make_app()
+    async with app.run_test(size=(50, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="mermaid", title="Wide", source=WIDE, draw=True))
+        await drawings_done(app)
+        await pilot.pause()
+        body = app.query_one("#body")
+        assert body.max_scroll_x > 0
+        assert body.show_horizontal_scrollbar
+
+
+async def test_a_wide_diagram_in_a_document_gets_a_horizontal_scrollbar():
+    app = make_app()
+    async with app.run_test(size=(50, 30)) as pilot:
+        await pilot.pause()
+        doc = f"# Flow\n\n```mermaid\n{WIDE}```\n"
+        await app.open_item(Item(kind="markdown", title="Doc", source=doc, draw=True))
+        await drawings_done(app)
+        await pilot.pause()
+        fence = app.query_one(DiagramFence)
+        assert fence.max_scroll_x > 0
+        assert fence.show_horizontal_scrollbar
+        assert fence.styles.scrollbar_size_horizontal == 1
+
+
+async def test_a_diagram_that_fits_has_no_horizontal_scrollbar():
+    app = make_app()
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="mermaid", title="Small", source="graph LR\n  A --> B", draw=True))
+        await drawings_done(app)
+        await pilot.pause()
+        assert not app.query_one("#body").show_horizontal_scrollbar
+
+
+async def test_a_wide_diagram_opens_scrolled_to_the_left():
+    app = make_app()
+    async with app.run_test(size=(50, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="mermaid", title="Wide", source=WIDE, draw=True))
+        await drawings_done(app)
+        await pilot.pause(0.3)
+        body = app.query_one("#body")
+        assert body.max_scroll_x > 0
+        assert body.scroll_x == 0

@@ -41,3 +41,32 @@ def test_repeated_draws_are_cached():
     first = render_diagram("graph LR\n  Cache --> Hit", PALETTE, max_width=60)
     second = render_diagram("graph LR\n  Cache --> Hit", PALETTE, max_width=60)
     assert first is second
+
+
+def test_wide_characters_do_not_shift_styles():
+    # termaid adds an empty cell after each wide (CJK) character; styles must stay on their letters.
+    source = (
+        "sequenceDiagram\n"
+        "  participant C as cli.py\n  participant I as 수신함 폴더\n  participant A as app.py\n"
+        "  C->>I: JSON 저장 (임시파일 후 rename)\n"
+        "  I-->>A: watchfiles 감지, rename으로 가져감\n"
+        "  A->>A: 화면 교체, 이전 것 버림\n"
+    )
+    text = render_diagram(source, PALETTE)
+    plain = text.plain
+    styled = [False] * len(plain)
+    for span in text.spans:
+        for i in range(span.start, span.end):
+            styled[i] = True
+    unstyled = "".join(ch for ch, has in zip(plain, styled) if ch.strip() and not has)
+    assert unstyled == ""
+
+
+def test_wide_characters_in_flowcharts_keep_their_styles():
+    text = render_diagram("graph LR\n  A[주문 요청] -->|저장| B[(오라클 DB)]", PALETTE)
+    plain = text.plain
+    styled = [False] * len(plain)
+    for span in text.spans:
+        for i in range(span.start, span.end):
+            styled[i] = True
+    assert "".join(ch for ch, has in zip(plain, styled) if ch.strip() and not has) == ""
