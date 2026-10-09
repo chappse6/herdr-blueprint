@@ -11,6 +11,9 @@ DIAGRAM_SUFFIXES = {".mmd", ".mermaid"}
 DOCUMENT_SUFFIXES = {".md", ".markdown"}
 VIEWABLE_SUFFIXES = DIAGRAM_SUFFIXES | DOCUMENT_SUFFIXES
 
+# Larger files are cut so a huge generated doc can't freeze the viewer.
+MAX_BYTES = 1_000_000
+
 
 @dataclass(frozen=True)
 class Item:
@@ -28,11 +31,20 @@ class Item:
         return self.path is not None and self.path.suffix.lower() in DIAGRAM_SUFFIXES
 
     def read(self) -> str:
-        """Text to render. Raises OSError when a file cannot be read."""
+        """Text to render. Raises OSError when a file cannot be read.
+
+        Bad bytes become U+FFFD and long files are cut, so odd files never
+        crash the viewer. Documents get a notice; diagrams stay valid Mermaid.
+        """
         if self.kind == "mermaid":
             return self.source or ""
         assert self.path is not None
-        return self.path.read_text(encoding="utf-8")
+        with self.path.open("rb") as handle:
+            data = handle.read(MAX_BYTES + 1)
+        text = data[:MAX_BYTES].decode("utf-8", errors="replace")
+        if len(data) > MAX_BYTES and not self.is_diagram:
+            text += f"\n\n> This file is large. Showing the first {MAX_BYTES:,} bytes.\n"
+        return text
 
 
 class History:

@@ -45,8 +45,8 @@ graph LR
 """
 
 
-def ago(at: float) -> str:
-    seconds = max(0, int(time.time() - at))
+def ago(at: float, now: float | None = None) -> str:
+    seconds = max(0, int((time.time() if now is None else now) - at))
     if seconds < 60:
         return "just now"
     if seconds < 3600:
@@ -103,6 +103,7 @@ class BlueprintApp(App[None]):
         self.root = root
         self.settings = settings or config_store.load()
         self.history = History()
+        self.notice: str | None = None
         for palette in PALETTES.values():
             self.register_theme(palette.textual_theme())
 
@@ -122,6 +123,7 @@ class BlueprintApp(App[None]):
         self.query_one("#source", Static).update("Welcome")
         self.run_worker(self._follow_files(), exclusive=False)
         self.run_worker(self._read_inbox(), exclusive=False)
+        self.set_interval(30, self._update_status)
 
     # Sources ---------------------------------------------------------------
 
@@ -144,9 +146,12 @@ class BlueprintApp(App[None]):
             return
         try:
             text = item.read()
-        except OSError as exc:
-            self.notify(f"Could not read {item.title}: {exc.strerror}", severity="warning")
+        except OSError:
+            # Keep the last content on screen; say what went wrong in the header.
+            self.notice = f"Cannot read {item.title}"
+            self._update_status()
             return
+        self.notice = None
         await self._render_text(text, diagram=item.is_diagram)
         self.query_one("#source", Static).update(item.title)
         self._update_status()
@@ -159,13 +164,16 @@ class BlueprintApp(App[None]):
         body.scroll_home(animate=False)
 
     def _update_status(self) -> None:
+        palette = palette_for_theme(self.theme)
         item = self.history.current
-        mark = "◉ follow" if self.following else "○ paused"
-        meta = ""
-        if item:
+        status = Text()
+        if self.notice:
+            status.append(f"⚠ {self.notice}   ", style=f"bold {palette.warning}")
+        elif item:
             origin = "saved" if item.sent_by == "follow" else f"from {item.sent_by}"
-            meta = f"{origin} {ago(item.at)}   "
-        self.query_one("#status", Static).update(f"{meta}{mark}")
+            status.append(f"{origin} {ago(item.at)}   ")
+        status.append("◉ follow" if self.following else "○ paused")
+        self.query_one("#status", Static).update(status)
 
     def _update_tabs(self) -> None:
         palette = palette_for_theme(self.theme)

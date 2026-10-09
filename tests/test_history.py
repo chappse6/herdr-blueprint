@@ -49,3 +49,28 @@ def test_diagram_detection():
     assert Item(kind="mermaid", title="x", source="graph LR").is_diagram
     assert file_item("flow.MMD").is_diagram
     assert not file_item("notes.md").is_diagram
+
+
+def test_read_replaces_bad_bytes(tmp_path):
+    doc = tmp_path / "bad.md"
+    doc.write_bytes(b"# Title \xff\xfe end")
+    text = Item(kind="file", title="bad.md", path=doc).read()
+    assert text.startswith("# Title ")
+    assert "�" in text
+
+
+def test_read_cuts_large_documents_with_notice(tmp_path, monkeypatch):
+    monkeypatch.setattr("herdr_blueprint.history.MAX_BYTES", 10)
+    doc = tmp_path / "big.md"
+    doc.write_text("a" * 50, encoding="utf-8")
+    text = Item(kind="file", title="big.md", path=doc).read()
+    assert text.startswith("a" * 10)
+    assert "a" * 11 not in text
+    assert "This file is large" in text
+
+
+def test_read_cuts_large_diagrams_without_notice(tmp_path, monkeypatch):
+    monkeypatch.setattr("herdr_blueprint.history.MAX_BYTES", 10)
+    diagram = tmp_path / "big.mmd"
+    diagram.write_text("b" * 50, encoding="utf-8")
+    assert Item(kind="file", title="big.mmd", path=diagram).read() == "b" * 10

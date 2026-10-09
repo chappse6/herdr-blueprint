@@ -1,6 +1,7 @@
-from herdr_blueprint.app import BlueprintApp
+from herdr_blueprint.app import BlueprintApp, ago
 from herdr_blueprint.config import Config
 from herdr_blueprint.document import DiagramView, DocumentView
+from herdr_blueprint.history import Item
 from herdr_blueprint.sources import inbox
 
 
@@ -44,3 +45,30 @@ async def test_theme_picker_enter_saves_choice(tmp_path):
         await pilot.press("t", "down", "enter")
         assert app.theme == "bp-blueprint"
         assert app.settings.theme == "blueprint"
+
+
+def test_ago_formats_relative_time():
+    assert ago(100, now=130) == "just now"
+    assert ago(100, now=100 + 120) == "2m ago"
+    assert ago(100, now=100 + 7200) == "2h ago"
+
+
+async def test_missing_file_shows_notice_and_keeps_content(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="file", title="gone.md", path=tmp_path / "gone.md"))
+        assert "Cannot read gone.md" in str(app.query_one("#status").render())
+        assert app.query(DocumentView)
+
+
+async def test_notice_clears_after_a_good_file(tmp_path):
+    good = tmp_path / "good.md"
+    good.write_text("# Good", encoding="utf-8")
+    app = make_app(tmp_path)
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="file", title="gone.md", path=tmp_path / "gone.md"))
+        await app.open_item(Item(kind="file", title="good.md", path=good))
+        assert app.notice is None
+        assert "Cannot read" not in str(app.query_one("#status").render())
