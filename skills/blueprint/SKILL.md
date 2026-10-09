@@ -1,6 +1,6 @@
 ---
 name: blueprint
-description: Use when running inside a herdr pane (HERDR_ENV=1) with the Blueprint plugin and a diagram or document would explain things better than chat text — architecture, request flows, sequences, data models, state machines — or when the user asks to "draw", "show a diagram", "visualize", "open this in Blueprint", or "refresh Blueprint".
+description: Use when running inside a herdr pane (HERDR_ENV=1) with the Blueprint plugin and a diagram or document would explain things better than chat text — architecture, request flows, sequences, data models, state machines — or when the user asks to "draw", "show a diagram", "visualize", "explain this in Blueprint", "open this in Blueprint", or "refresh Blueprint".
 ---
 
 # Blueprint
@@ -60,11 +60,24 @@ so send Markdown with `--draw`, in the user's language:
 2. Two to four short lines: the goal, what is done, what you are doing now.
 3. A `mermaid` fence with the flow or structure you are working on.
 
+## When asked to explain a feature
+
+Read the code first: explain what it does, not what it probably does. Then send
+Markdown with `--draw`, in the user's language:
+
+1. A `#` heading naming the feature.
+2. Two or three lines: what it does and the one idea that makes it work.
+3. A `mermaid` fence: `sequenceDiagram` for a flow between parts, `flowchart`
+   for structure or decisions.
+4. A table of the steps: `file:line` and the key point of each.
+
 ## Writing diagrams
 
 - Keep the title short; it shows in the header.
 - Plain Mermaid works best: `graph`/`flowchart`, `sequenceDiagram`, `erDiagram`,
   `classDiagram`, `stateDiagram-v2`. Keep diagrams under about 100 nodes.
 - Labels are plain text: no `<br/>` or other HTML, which breaks the node.
+- The side pane is narrow: keep a `sequenceDiagram` to four participants and
+  short labels, or the right side scrolls out of view.
 - Labels may use the user's language.
 - In chat, say in one line what you sent ("Sent the order flow to Blueprint").
