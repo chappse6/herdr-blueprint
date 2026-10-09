@@ -7,4 +7,6 @@ def isolated_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr("herdr_blueprint.sources.inbox.user_state_dir", lambda _app: str(tmp_path / "state"))
     monkeypatch.setattr("herdr_blueprint.config.user_config_dir", lambda _app: str(tmp_path / "config"))
     monkeypatch.setenv("HERDR_WORKSPACE_ID", "test")
+    # Tests decide whether they run inside a herdr session.
+    monkeypatch.delenv("HERDR_SOCKET_PATH", raising=False)
     return tmp_path

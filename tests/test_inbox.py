@@ -123,3 +123,20 @@ def test_closing_a_second_viewer_keeps_the_first():
 def test_viewer_records_are_not_messages():
     inbox.mark_viewer("w1:pA")
     assert inbox._pending(inbox.inbox_dir()) == []
+
+
+# --- herdr sessions ----------------------------------------------------------------
+
+def test_each_herdr_session_has_its_own_inbox(monkeypatch):
+    # Two sessions both have a workspace w1; a send in one must not reach the other.
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/home/me/.config/herdr/herdr.sock")
+    main = inbox.inbox_dir("w1")
+    assert inbox.inbox_dir("w1") == main
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/home/me/.config/herdr/sessions/demo/herdr.sock")
+    demo = inbox.inbox_dir("w1")
+    assert demo != main
+    assert demo.parent == main.parent
+
+
+def test_outside_herdr_the_inbox_is_named_after_the_workspace():
+    assert inbox.inbox_dir("w1").name == "w1"

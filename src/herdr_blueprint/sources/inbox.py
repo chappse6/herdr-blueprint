@@ -5,6 +5,7 @@ Files instead of sockets keep this the same on macOS, Linux and Windows.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -36,6 +37,11 @@ class Refresh:
 def inbox_dir(workspace: str | None = None) -> Path:
     workspace = workspace or os.environ.get("HERDR_WORKSPACE_ID") or "default"
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", workspace)
+    # Workspace ids repeat across herdr sessions (each has a w1), so inside herdr
+    # the folder also names the session, by its socket.
+    socket = os.environ.get("HERDR_SOCKET_PATH")
+    if socket:
+        safe = f"{hashlib.sha256(socket.encode()).hexdigest()[:8]}-{safe}"
     return Path(user_state_dir("herdr-blueprint")) / "inbox" / safe
 
 
