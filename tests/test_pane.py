@@ -78,7 +78,10 @@ def test_ask_submits_the_blueprint_prompt_to_the_agent_pane():
 
     result = pane.ask_to_draw("herdr", pane.Source("w1:p1", agent="claude"), run=run)
     assert seen["cmd"][:4] == ["herdr", "agent", "prompt", "w1:p1"]
-    assert "blueprint skill" in seen["cmd"][4] and "--draw" in seen["cmd"][4]
+    prompt = seen["cmd"][4]
+    assert "blueprint skill" in prompt and "--draw" in prompt
+    # A bare diagram doesn't say what is going on: ask for a summary with it.
+    assert "Markdown" in prompt and "summary" in prompt
     assert result == (True, "Asked claude to draw")
 
 

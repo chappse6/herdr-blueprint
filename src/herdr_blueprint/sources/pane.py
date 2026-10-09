@@ -13,8 +13,8 @@ from ..item import VIEWABLE_SUFFIXES, clean
 
 # What `a` types into the agent. The agent finds the blueprint skill by name.
 ASK_PROMPT = (
-    "Use the blueprint skill: draw what you are working on now "
-    "and send it to Blueprint with --draw."
+    "Use the blueprint skill: send what you are working on now to Blueprint "
+    "with --draw, as Markdown with a short summary and a Mermaid diagram."
 )
 
 # The file list is for picking, not browsing: the newest few are enough.

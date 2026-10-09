@@ -51,10 +51,20 @@ Empty `$root` means the plugin is not installed: tell the user to run
   then shows as code, which is faster.
 - The flag belongs to each send or refresh.
 
+## When asked what you are working on
+
+The user pressed `a` in Blueprint. A bare diagram doesn't say what is going on,
+so send Markdown with `--draw`, in the user's language:
+
+1. A `#` heading with the task.
+2. Two to four short lines: the goal, what is done, what you are doing now.
+3. A `mermaid` fence with the flow or structure you are working on.
+
 ## Writing diagrams
 
 - Keep the title short; it shows in the header.
 - Plain Mermaid works best: `graph`/`flowchart`, `sequenceDiagram`, `erDiagram`,
   `classDiagram`, `stateDiagram-v2`. Keep diagrams under about 100 nodes.
+- Labels are plain text: no `<br/>` or other HTML, which breaks the node.
 - Labels may use the user's language.
 - In chat, say in one line what you sent ("Sent the order flow to Blueprint").
