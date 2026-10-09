@@ -2,6 +2,11 @@
 
 Live Markdown and Mermaid for your agent's side pane.
 
+<p align="center">
+  <img src="docs/screenshots/document.svg" width="49%" alt="Blueprint showing a Markdown document with a Mermaid flowchart">
+  <img src="docs/screenshots/blueprint-theme.svg" width="49%" alt="The same document in the Blueprint theme">
+</p>
+
 Blueprint is a [herdr](https://herdr.dev) plugin. Put it next to your coding
 agent and it shows the docs and diagrams the agent writes, drawn in your
 terminal with colors that match your theme.
@@ -69,6 +74,8 @@ to pick it up. Undo with `herdr-blueprint uninstall-skill`.
 
 Rosé Pine (default), Blueprint, Catppuccin Mocha, Tokyo Night, Nord, Gruvbox
 and Dracula. Your choice is saved.
+
+<img src="docs/screenshots/theme-picker.svg" width="60%" alt="Theme picker with live preview">
 
 ## Development
 
