@@ -1,0 +1,22 @@
+id = "seeun.blueprint"
+name = "Blueprint"
+version = "0.1.0"
+min_herdr_version = "0.9.3"
+description = "Live Markdown and Mermaid viewer for the side pane. Follows the docs your agent writes."
+platforms = ["macos", "linux", "windows"]
+
+# Needs uv: https://docs.astral.sh/uv/
+[[build]]
+command = ["uv", "sync", "--frozen", "--no-dev"]
+
+[[panes]]
+id = "viewer"
+title = "Blueprint"
+placement = "split"
+command = ["uv", "run", "--no-sync", "herdr-blueprint"]
+
+[[actions]]
+id = "open"
+title = "Open Blueprint"
+contexts = ["workspace"]
+command = ["uv", "run", "--no-sync", "herdr-blueprint", "open"]

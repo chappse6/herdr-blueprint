@@ -1,0 +1,77 @@
+Screen {
+    background: $background;
+}
+
+#top {
+    height: 1;
+    background: $panel;
+    padding: 0 1;
+}
+
+#brand {
+    width: auto;
+    color: $accent;
+    text-style: bold;
+    padding-right: 2;
+}
+
+#source {
+    width: 1fr;
+    color: $foreground;
+    text-style: bold;
+}
+
+#status {
+    width: auto;
+    color: $primary;
+}
+
+#body {
+    padding: 1 2;
+    background: $background;
+}
+
+DocumentView {
+    background: $background;
+}
+
+DiagramView {
+    width: auto;
+    padding: 1 0;
+}
+
+#tabs {
+    height: 1;
+    background: $surface;
+    padding: 0 1;
+}
+
+ThemePicker {
+    align: center middle;
+    background: $background 40%;
+}
+
+#picker {
+    width: 38;
+    height: auto;
+    border: round $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#picker-title {
+    color: $accent;
+    text-style: bold;
+    padding-bottom: 1;
+}
+
+#picker OptionList {
+    height: auto;
+    border: none;
+    background: $surface;
+}
+
+#picker-hint {
+    color: $text-muted;
+    padding-top: 1;
+}
