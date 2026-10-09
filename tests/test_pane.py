@@ -161,10 +161,15 @@ def test_keeps_only_the_newest_files(tmp_path):
 
 def test_short_folder_keeps_the_last_two_parts():
     home = Path("/Users/me")
-    assert pane.short_folder(Path("/Users/me/work/herdr/agent-title"), home) == "~/…/herdr/agent-title"
-    assert pane.short_folder(Path("/Users/me/app"), home) == "~/app"
-    assert pane.short_folder(Path("/srv/a/b/c"), home) == "/…/b/c"
-    assert pane.short_folder(Path("/srv"), home) == "/srv"
+
+    def native(text: str) -> str:
+        # Folders show with the OS separator: ~\…\herdr\agent-title on Windows.
+        return text.replace("/", os.sep)
+
+    assert pane.short_folder(Path("/Users/me/work/herdr/agent-title"), home) == native("~/…/herdr/agent-title")
+    assert pane.short_folder(Path("/Users/me/app"), home) == native("~/app")
+    assert pane.short_folder(Path("/srv/a/b/c"), home) == native("/…/b/c")
+    assert pane.short_folder(Path("/srv"), home) == native("/srv")
 
 
 def test_a_hung_herdr_or_git_does_not_hang_or_crash(tmp_path):
