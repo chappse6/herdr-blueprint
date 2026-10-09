@@ -1,7 +1,7 @@
 [project]
 name = "herdr-blueprint"
-version = "0.4.0"
-description = "A live Markdown and Mermaid viewer for the herdr side pane."
+version = "0.4.1"
+description = "Your coding agent explains its work as diagrams in a herdr side pane."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Seeun Park" }]

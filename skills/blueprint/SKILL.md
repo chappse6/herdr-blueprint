@@ -16,7 +16,7 @@ lines in the same shell command as each call: shell variables don't carry over
 between tool calls.
 
 ```bash
-root=$(herdr plugin list --json | jq -r '.result.plugins[] | select(.plugin_id == "seeun.blueprint") | .plugin_root')
+root=$(herdr plugin list --plugin seeun.blueprint --json | uv run --no-project --quiet python -c 'import json, sys; p = json.load(sys.stdin)["result"]["plugins"]; print(p[0]["plugin_root"] if p else "")')
 # Not named blueprint: a `blueprint` alias would make this a parse error.
 blueprint_cli() { uv run --project "$root" --no-sync python -m herdr_blueprint "$@"; }
 

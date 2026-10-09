@@ -4,7 +4,9 @@
 
 <h1 align="center">Blueprint</h1>
 
-<p align="center">Live Markdown and Mermaid for your agent's side pane.</p>
+<p align="center"><b>Your coding agent explains its work as diagrams, right next to the chat.</b></p>
+
+<p align="center">Live Markdown and Mermaid for your agent's side pane, in your terminal.</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
@@ -92,7 +94,7 @@ The command lives in the plugin's own environment. From an agent, run it
 through the plugin folder:
 
 ```bash
-root=$(herdr plugin list --json | jq -r '.result.plugins[] | select(.plugin_id == "seeun.blueprint") | .plugin_root')
+root=$(herdr plugin list --plugin seeun.blueprint --json | uv run --no-project --quiet python -c 'import json, sys; p = json.load(sys.stdin)["result"]["plugins"]; print(p[0]["plugin_root"] if p else "")')
 uv run --project "$root" --no-sync python -m herdr_blueprint send --draw --title "Flow" < flow.mmd
 ```
 

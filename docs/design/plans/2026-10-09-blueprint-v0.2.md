@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.10+, uv (managed Python only), Textual 8, termaid 0.9 (rich extra), watchfiles, platformdirs, pytest, pytest-asyncio, pytest-textual-snapshot.
 
-**Spec:** `docs/superpowers/specs/2026-10-09-blueprint-design.md`
+**Spec:** `docs/design/specs/2026-10-09-blueprint-design.md`
 
 ## Global Constraints
 
@@ -364,7 +364,7 @@ than an hour are dropped, and skipped messages are logged."
 
 **Files:**
 - Modify: `src/herdr_blueprint/cli.py` (`ROOT_ENV`, `detect_root`, new `focused_pane`, new `open_command`, `open` branch of `main`)
-- Modify: `docs/superpowers/specs/2026-10-09-blueprint-design.md` (workspace root order)
+- Modify: `docs/design/specs/2026-10-09-blueprint-design.md` (workspace root order)
 - Test: `tests/test_cli.py`
 
 **Interfaces:**
@@ -505,7 +505,7 @@ Expected: all pass.
 
 - [ ] **Step 5: Update the spec's workspace root order**
 
-In `docs/superpowers/specs/2026-10-09-blueprint-design.md`, replace the "Workspace root, first match wins" list with:
+In `docs/design/specs/2026-10-09-blueprint-design.md`, replace the "Workspace root, first match wins" list with:
 
 ```markdown
 Workspace root, first match wins:
@@ -538,7 +538,7 @@ If the pane opens in the plugin folder instead of the workspace (saving `hello.m
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/herdr_blueprint/cli.py tests/test_cli.py docs/superpowers/specs/2026-10-09-blueprint-design.md
+git add src/herdr_blueprint/cli.py tests/test_cli.py docs/design/specs/2026-10-09-blueprint-design.md
 git commit -m "Open the viewer to the right of the agent pane
 
 The open action reads the focused pane's folder and passes it to the

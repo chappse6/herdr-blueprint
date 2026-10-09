@@ -1,8 +1,8 @@
 id = "seeun.blueprint"
 name = "Blueprint"
-version = "0.4.0"
+version = "0.4.1"
 min_herdr_version = "0.9.3"
-description = "Shows the latest doc or diagram your agent sends in the side pane, drawn on request."
+description = "Your coding agent explains its work as diagrams, right next to the chat."
 platforms = ["macos", "linux", "windows"]
 
 # Needs uv: https://docs.astral.sh/uv/

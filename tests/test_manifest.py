@@ -36,3 +36,10 @@ def test_agents_run_the_module_too():
     for text in (SKILL, README):
         assert not re.search(r"--no-sync herdr-blueprint", text)
         assert "--no-sync python -m herdr_blueprint" in text
+
+
+def test_finding_the_plugin_needs_only_uv():
+    # jq is missing on many machines (most Windows ones); uv is required anyway.
+    for text in (SKILL, README):
+        assert "jq " not in text
+        assert "herdr plugin list --plugin seeun.blueprint --json | uv run --no-project" in text
