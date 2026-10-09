@@ -78,7 +78,9 @@ Markdown with `--draw`, in the user's language:
 - Plain Mermaid works best: `graph`/`flowchart`, `sequenceDiagram`, `erDiagram`,
   `classDiagram`, `stateDiagram-v2`. Keep diagrams under about 100 nodes.
 - Labels are plain text: no `<br/>` or other HTML, which breaks the node.
-- The side pane is narrow: keep a `sequenceDiagram` to four participants and
-  short labels, or the right side scrolls out of view.
+- The side pane is narrow, about 100 columns. Keep a `sequenceDiagram` to four
+  participants and every message or edge label to about 20 characters
+  (`POST /token`, not `POST /token with code_verifier and client_id`); put the
+  detail in the text or table instead. Wide diagrams scroll out of view.
 - Labels may use the user's language.
 - In chat, say in one line what you sent ("Sent the order flow to Blueprint").
