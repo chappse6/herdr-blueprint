@@ -64,7 +64,13 @@ def ago(at: float, now: float | None = None) -> str:
 class ThemePicker(ModalScreen[str | None]):
     """Pick a palette. Moving the cursor previews it; Esc puts the old one back."""
 
-    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("q", "cancel", show=False),
+        # vim keys, same as in the viewer
+        Binding("j", "cursor(1)", show=False),
+        Binding("k", "cursor(-1)", show=False),
+    ]
 
     def __init__(self, current: str) -> None:
         super().__init__()
@@ -74,7 +80,7 @@ class ThemePicker(ModalScreen[str | None]):
         with Vertical(id="picker"):
             yield Static("Theme", id="picker-title")
             yield OptionList(*(Option(p.label, id=p.name) for p in PALETTES.values()))
-            yield Static("↑↓ preview   ⏎ keep   esc cancel", id="picker-hint")
+            yield Static("j/k preview   ⏎ keep   esc cancel", id="picker-hint")
 
     def on_mount(self) -> None:
         options = self.query_one(OptionList)
@@ -85,6 +91,13 @@ class ThemePicker(ModalScreen[str | None]):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option.id)
+
+    def action_cursor(self, step: int) -> None:
+        options = self.query_one(OptionList)
+        if step > 0:
+            options.action_cursor_down()
+        else:
+            options.action_cursor_up()
 
     def action_cancel(self) -> None:
         self.app.theme = self.original

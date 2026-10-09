@@ -65,7 +65,7 @@ the terminal, and replaces it when the next one arrives. No browser, no images.
 |---|---|
 | `h` `j` `k` `l` | Move like vim; `h`/`l` scroll a wide diagram sideways |
 | `g` `G` | Top, bottom |
-| `t` | Theme picker (live preview, `Enter` keeps, `Esc` cancels) |
+| `t` | Theme picker: `j`/`k` preview, `Enter` keeps, `Esc` or `q` cancels |
 | `r` | Reload what is shown |
 | `q` | Quit |
 

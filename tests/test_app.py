@@ -514,3 +514,24 @@ async def test_the_footer_shows_the_move_keys():
         await pilot.pause()
         shown = [b for b in app.BINDINGS if b.show]
         assert any(b.key_display == "hjkl" for b in shown)
+
+
+async def test_theme_picker_moves_with_j_and_k():
+    app = make_app()
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("t", "j")
+        assert app.theme == "bp-blueprint"
+        await pilot.press("j")
+        assert app.theme == "bp-catppuccin-mocha"
+        await pilot.press("k")
+        assert app.theme == "bp-blueprint"
+        await pilot.press("enter")
+        assert app.settings.theme == "blueprint"
+
+
+async def test_theme_picker_q_cancels_like_escape():
+    app = make_app()
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.press("t", "j", "q")
+        assert app.theme == "bp-rose-pine"
+        assert app.is_running
