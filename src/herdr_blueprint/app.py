@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
+from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -20,7 +23,9 @@ from . import config as config_store
 from .diagram import MAX_DIAGRAM_CHARS
 from .document import DiagramView, DocumentView, PlainView, as_code
 from .item import Item, clean, is_large
+from .sources import pane
 from .sources.inbox import Refresh, watch_inbox
+from .start import FilePicker, StartView
 from .themes import PALETTES, get_palette, palette_for_theme
 
 WELCOME = """\
@@ -115,17 +120,34 @@ class BlueprintApp(App[None]):
         Binding("l", "move(1, 0)", show=False),
         Binding("g", "jump(False)", show=False),
         Binding("G", "jump(True)", show=False),
+        # Only offered when Blueprint knows the pane it was opened next to.
+        Binding("a", "ask", "Ask"),
+        Binding("o", "open_file", "Open"),
         Binding("t", "pick_theme", "Theme"),
         Binding("r", "reload", "Reload"),
         Binding("q", "quit", "Quit"),
     ]
 
-    def __init__(self, settings: config_store.Config | None = None) -> None:
+    def __init__(
+        self,
+        settings: config_store.Config | None = None,
+        source: pane.Source | None = None,
+        *,
+        asker: Callable[[pane.Source], tuple[bool, str]] | None = None,
+        finder: Callable[[Path], list[Path]] | None = None,
+    ) -> None:
         super().__init__()
         self.settings = settings or config_store.load()
+        # The pane Blueprint was opened next to; None outside herdr.
+        self.source = source
+        herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
+        self._asker = asker or (lambda src: pane.ask_to_draw(herdr, src))
+        self._finder = finder or pane.find_documents
         self.current: Item | None = None
         self.notice: str | None = None
-        self.title_text = "Welcome"
+        # A notice is a warning unless it reports something that worked.
+        self.notice_ok = False
+        self.title_text = "Start" if source else "Welcome"
         # Sends, refreshes and keys can overlap; one render at a time.
         self._render_lock = asyncio.Lock()
         for palette in PALETTES.values():
@@ -141,8 +163,12 @@ class BlueprintApp(App[None]):
 
     async def on_mount(self) -> None:
         self.theme = get_palette(self.settings.theme).theme_name
-        # The welcome example is tiny and ours, so it is always drawn.
-        await self._render_text(WELCOME, diagram=False, draw=True, plain=False)
+        if self.source:
+            body = self.query_one("#body", VerticalScroll)
+            await body.mount(StartView(self.source))
+        else:
+            # The welcome example is tiny and ours, so it is always drawn.
+            await self._render_text(WELCOME, diagram=False, draw=True, plain=False)
         self._update_status()
         self.run_worker(self._read_inbox(), exclusive=False, exit_on_error=False)
         self.set_interval(30, self._update_status)
@@ -158,8 +184,9 @@ class BlueprintApp(App[None]):
         except Exception as exc:
             self._show_notice(f"Inbox stopped: {exc}")
 
-    def _show_notice(self, message: str) -> None:
+    def _show_notice(self, message: str, ok: bool = False) -> None:
         self.notice = message
+        self.notice_ok = ok
         self._update_status()
 
     # Rendering -------------------------------------------------------------
@@ -194,6 +221,7 @@ class BlueprintApp(App[None]):
             self.notice = "Large file, shown as plain text"
         else:
             self.notice = None
+        self.notice_ok = False
         await self._render_text(text, diagram=item.is_diagram, draw=draw, plain=plain)
         self.current = item
         self.title_text = clean(item.title)
@@ -227,14 +255,17 @@ class BlueprintApp(App[None]):
         narrow = self.size.width < NARROW_WIDTH
         brand.display = not narrow
         palette = palette_for_theme(self.theme)
-        warning = f"bold {palette.warning}"
+        if self.notice_ok:
+            notice = Text(f"✓ {self.notice}", style=f"bold {palette.success}")
+        else:
+            notice = Text(f"⚠ {self.notice}", style=f"bold {palette.warning}")
         if narrow and self.notice:
-            source.update(Text(f"⚠ {self.notice}", style=warning))
+            source.update(notice)
         else:
             source.update(Text(self.title_text))
         status = Text()
         if self.notice and not narrow:
-            status.append(f"⚠ {self.notice}", style=warning)
+            status.append_text(notice)
         elif self.current and narrow:
             status.append(ago(self.current.at).removesuffix(" ago").replace("just ", ""))
         elif self.current:
@@ -246,6 +277,40 @@ class BlueprintApp(App[None]):
             self._update_status()
 
     # Actions ---------------------------------------------------------------
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # Hidden from the footer and the keys do nothing when there is no pane to use.
+        if action == "ask":
+            return bool(self.source and self.source.agent)
+        if action == "open_file":
+            return bool(self.source and self.source.cwd)
+        return True
+
+    def action_ask(self) -> None:
+        """Ask the agent next to Blueprint to draw what it is doing."""
+        if self.source and self.source.agent:
+            self.run_worker(self._ask, thread=True, group="ask", exclusive=True)
+
+    def _ask(self) -> None:
+        assert self.source is not None
+        ok, message = self._asker(self.source)
+        self.call_from_thread(self._show_notice, message, ok)
+
+    def action_open_file(self) -> None:
+        """Pick a doc or diagram from the folder of the pane next to Blueprint."""
+        if not (self.source and self.source.cwd):
+            return
+        folder = self.source.cwd
+
+        def picked(path: Path | None) -> None:
+            if path is None:
+                return
+            title = path.relative_to(folder).as_posix() if path.is_relative_to(folder) else path.name
+            # Picking a file is a send from you, with the draw flag set.
+            item = Item(kind="file", title=title, path=path, sent_by="you", draw=True)
+            self.run_worker(self.open_item(item), group="open")
+
+        self.push_screen(FilePicker(folder, self._finder), picked)
 
     def action_pick_theme(self) -> None:
         def chosen(name: str | None) -> None:

@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 from herdr_blueprint import cli
-from herdr_blueprint.sources import inbox
+from herdr_blueprint.sources import inbox, pane
 
 
 def messages():
@@ -90,18 +90,57 @@ def test_refresh_asks_the_viewer_to_redraw(capsys):
 
 # --- open -------------------------------------------------------------------------
 
-def test_open_command_targets_pane_to_the_right_without_focus():
+def test_open_command_opens_to_the_right_of_the_pane_and_focuses():
     cmd = cli.open_command("herdr", "w1:p1")
     assert cmd[:4] == ["herdr", "plugin", "pane", "open"]
     assert cmd[cmd.index("--placement") + 1] == "split"
     assert cmd[cmd.index("--direction") + 1] == "right"
     assert cmd[cmd.index("--target-pane") + 1] == "w1:p1"
-    assert "--no-focus" in cmd
-    assert "--env" not in cmd
+    # The viewer is opened to be used: a and o need the focus.
+    assert "--focus" in cmd and "--no-focus" not in cmd
+    # The viewer learns which pane it sits next to.
+    assert cmd[cmd.index("--env") + 1] == "BLUEPRINT_SOURCE_PANE=w1:p1"
 
 
 def test_open_command_without_pane():
-    assert "--target-pane" not in cli.open_command("herdr", None)
+    cmd = cli.open_command("herdr", None)
+    assert "--target-pane" not in cmd and "--env" not in cmd
+
+
+def test_open_focuses_the_viewer_already_open():
+    inbox.mark_viewer("w1:pV")
+    cmd = cli.viewer_command("herdr", "w1:p1", exists=lambda herdr, pane_id: pane_id == "w1:pV")
+    assert cmd == ["herdr", "plugin", "pane", "focus", "w1:pV"]
+
+
+def test_open_opens_a_new_viewer_when_the_old_one_is_gone():
+    inbox.mark_viewer("w1:pV")
+    cmd = cli.viewer_command("herdr", "w1:p1", exists=lambda herdr, pane_id: False)
+    assert cmd == cli.open_command("herdr", "w1:p1")
+    assert cli.viewer_command("herdr", "w1:p1", exists=lambda *a: True) != cmd  # sanity: record is read
+
+
+def test_the_viewer_knows_its_neighbor_and_records_itself(monkeypatch):
+    seen = {}
+
+    class FakeApp:
+        def __init__(self, source=None):
+            seen["source"] = source
+
+        def run(self):
+            seen["record"] = inbox.viewer_pane()
+
+    monkeypatch.setattr("herdr_blueprint.app.BlueprintApp", FakeApp)
+    monkeypatch.setattr(
+        "herdr_blueprint.sources.pane.source_of",
+        lambda herdr, pane_id: pane.Source(pane_id, agent="claude") if pane_id else None,
+    )
+    monkeypatch.setenv("BLUEPRINT_SOURCE_PANE", "w1:p1")
+    monkeypatch.setenv("HERDR_PANE_ID", "w1:pV")
+    assert cli.main([]) == 0
+    assert seen["source"] == pane.Source("w1:p1", agent="claude")
+    assert seen["record"] == "w1:pV"
+    assert inbox.viewer_pane() is None  # cleared on close
 
 
 def test_focused_pane_id_prefers_the_given_pane():

@@ -26,6 +26,9 @@ in your terminal with colors that match your theme.
 - **Draw on request.** Mermaid is drawn with [termaid](https://github.com/fasouto/termaid)
   when the sender adds `--draw`; otherwise it stays as clean text.
 - **Refresh on request.** The agent (or `r`) redraws what is on screen.
+- **Knows its neighbor.** Opened next to an agent, it shows the agent, its task
+  and folder. Press `a` to ask the agent to draw its task, or `o` to open a doc
+  from that folder.
 - **Themes.** Press `t` to pick a theme. Only your theme is saved.
 - **Runs everywhere.** macOS, Linux and Windows. No browser, no images.
 
@@ -38,6 +41,8 @@ herdr plugin install chappse6/herdr-blueprint
 herdr plugin action invoke seeun.blueprint.open
 ```
 
+It opens to the right of the focused pane and takes the focus. If Blueprint is
+already open in the workspace, it is focused instead of opening a second one.
 Bind it to a key in `~/.config/herdr/config.toml`:
 
 ```toml
@@ -54,6 +59,8 @@ description = "open Blueprint"
 |---|---|
 | `h` `j` `k` `l` | Move left, down, up, right |
 | `g` `G` | Top, bottom |
+| `a` | Ask the agent next to Blueprint to draw its task |
+| `o` | Open a Markdown or Mermaid file from that pane's folder |
 | `t` | Change theme |
 | `r` | Reload |
 | `q` | Quit |

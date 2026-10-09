@@ -11,6 +11,8 @@ Status: v1 decided
 > Nothing but the theme is kept.
 
 The worker is the coding agent (or the person) that sends things to the viewer.
+Picking a file with `o` is a send from the person; `a` asks the agent next to the
+viewer to send.
 
 ## Summary
 

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from .item import VIEWABLE_SUFFIXES
-from .sources import inbox
+from .sources import inbox, pane
 
 PLUGIN_ID = "seeun.blueprint"
 
@@ -34,16 +34,28 @@ def focused_pane_id(herdr: str, pane_id: str | None, run=subprocess.run) -> str 
         return None
 
 
+# Set on the viewer by `open`: the pane it was opened next to.
+SOURCE_ENV = "BLUEPRINT_SOURCE_PANE"
+
+
 def open_command(herdr: str, pane_id: str | None) -> list[str]:
-    """herdr command that opens the viewer to the right without moving focus."""
+    """herdr command that opens the viewer to the right of `pane_id` and focuses it."""
     cmd = [
         herdr, "plugin", "pane", "open",
         "--plugin", PLUGIN_ID, "--entrypoint", "viewer",
-        "--placement", "split", "--direction", "right", "--no-focus",
+        "--placement", "split", "--direction", "right", "--focus",
     ]
     if pane_id:
-        cmd += ["--target-pane", pane_id]
+        cmd += ["--target-pane", pane_id, "--env", f"{SOURCE_ENV}={pane_id}"]
     return cmd
+
+
+def viewer_command(herdr: str, pane_id: str | None, exists=pane.pane_exists) -> list[str]:
+    """Focus the viewer already open in this workspace, or open one next to `pane_id`."""
+    existing = inbox.viewer_pane()
+    if existing and exists(herdr, existing):
+        return [herdr, "plugin", "pane", "focus", existing]
+    return open_command(herdr, pane_id)
 
 
 def read_stdin() -> str:
@@ -120,13 +132,21 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
         return 0
 
+    herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
     if args.command == "open":
-        herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
-        return subprocess.call(open_command(herdr, focused_pane_id(herdr, os.environ.get("HERDR_PANE_ID"))))
+        return subprocess.call(viewer_command(herdr, focused_pane_id(herdr, os.environ.get("HERDR_PANE_ID"))))
 
     from .app import BlueprintApp
 
-    BlueprintApp().run()
+    # Inside its herdr pane, the viewer records itself so `open` focuses it next time.
+    viewer_id = os.environ.get("HERDR_PANE_ID")
+    if viewer_id:
+        inbox.mark_viewer(viewer_id)
+    try:
+        BlueprintApp(source=pane.source_of(herdr, os.environ.get(SOURCE_ENV))).run()
+    finally:
+        if viewer_id:
+            inbox.clear_viewer(viewer_id)
     return 0
 
 

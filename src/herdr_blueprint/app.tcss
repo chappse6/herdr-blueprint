@@ -77,3 +77,105 @@ ThemePicker {
     color: $text-muted;
     padding-top: 1;
 }
+
+/* Start screen: shown until the first send. */
+StartView {
+    height: auto;
+    padding: 1 0;
+}
+
+.start-title {
+    color: $accent;
+    text-style: bold;
+    padding-bottom: 1;
+}
+
+.start-row {
+    height: auto;
+}
+
+.start-name {
+    width: 9;
+    color: $text-muted;
+}
+
+.start-value {
+    width: 1fr;
+    text-style: bold;
+}
+
+.start-actions {
+    height: auto;
+    padding-top: 1;
+}
+
+.start-action {
+    height: auto;
+}
+
+.start-action:hover {
+    background: $boost;
+}
+
+.start-key {
+    width: 4;
+    color: $accent;
+    text-style: bold;
+}
+
+.start-does {
+    width: 1fr;
+}
+
+.start-hint {
+    color: $text-muted;
+    padding-top: 1;
+}
+
+FilePicker {
+    align: center middle;
+    background: $background 40%;
+}
+
+#files {
+    width: 90%;
+    max-width: 64;
+    height: auto;
+    max-height: 80%;
+    border: round $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#files-top {
+    height: 1;
+    margin-bottom: 1;
+}
+
+#files-title {
+    width: auto;
+    color: $accent;
+    text-style: bold;
+    padding-right: 2;
+}
+
+#files-folder {
+    width: 1fr;
+    color: $text-muted;
+}
+
+#files-status {
+    color: $text-muted;
+}
+
+#files-list {
+    height: auto;
+    max-height: 20;
+    border: none;
+    background: $surface;
+}
+
+#files-hint {
+    color: $text-muted;
+    padding-top: 1;
+}

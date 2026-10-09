@@ -1,11 +1,17 @@
 import asyncio
+import os
 import time
+from pathlib import Path
+
+from textual.widgets import OptionList, Static
 
 from herdr_blueprint.app import BlueprintApp, ago
 from herdr_blueprint.config import Config
 from herdr_blueprint.document import DiagramFence, DiagramView, DocumentView, PlainView
 from herdr_blueprint.item import Item
 from herdr_blueprint.sources import inbox
+from herdr_blueprint.sources.pane import Source
+from herdr_blueprint.start import FilePicker, StartView
 
 
 def make_app() -> BlueprintApp:
@@ -534,4 +540,144 @@ async def test_theme_picker_q_cancels_like_escape():
     async with app.run_test(size=(80, 40)) as pilot:
         await pilot.press("t", "j", "q")
         assert app.theme == "bp-rose-pine"
+        assert app.is_running
+
+
+# --- the start screen ---------------------------------------------------------------
+
+
+
+def start_app(source=None, asker=None, finder=None) -> BlueprintApp:
+    return BlueprintApp(settings=Config(theme="rose-pine"), source=source, asker=asker, finder=finder)
+
+
+def start_text(app) -> str:
+    return "\n".join(str(static.content) for static in app.query_one(StartView).query(Static))
+
+
+def header_text(app) -> str:
+    return str(app.query_one("#source", Static).content) + " | " + str(app.query_one("#status", Static).content)
+
+
+async def test_opened_next_to_an_agent_it_shows_who_and_what_to_do(tmp_path):
+    source = Source("w1:p1", agent="claude", task="Fix login", cwd=Path.home() / "work" / "shop" / "web")
+    app = start_app(source)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        text = start_text(app)
+        assert "Nothing here yet" in text
+        assert "claude" in text and "Fix login" in text
+        assert "~/…/shop/web".replace("/", os.sep) in text
+        assert "Ask claude to draw this task" in text
+        assert "Open a file from this folder" in text
+        assert app.check_action("ask", ()) and app.check_action("open_file", ())
+        assert app.current is None
+
+
+async def test_next_to_a_shell_there_is_nobody_to_ask(tmp_path):
+    app = start_app(Source("w1:p1", cwd=tmp_path))
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        assert "Ask" not in start_text(app)
+        assert not app.check_action("ask", ())
+        assert app.check_action("open_file", ())
+
+
+async def test_outside_herdr_it_keeps_the_welcome_screen():
+    app = start_app(None)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        assert not app.query(StartView)
+        assert app.query(DocumentView)
+        assert not app.check_action("ask", ()) and not app.check_action("open_file", ())
+
+
+async def test_a_send_replaces_the_start_screen(tmp_path):
+    app = start_app(Source("w1:p1", agent="claude", cwd=tmp_path))
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause(0.3)
+        inbox.send({"kind": "text", "source": "# Plan", "title": "Plan"})
+        await wait_for(pilot, lambda: app.current and app.current.title == "Plan")
+        assert not app.query(StartView)
+        # a and o keep working after the first send.
+        assert app.check_action("ask", ()) and app.check_action("open_file", ())
+
+
+async def test_a_asks_the_agent_and_says_so(tmp_path):
+    asked = []
+
+    def asker(source):
+        asked.append(source.pane_id)
+        return True, "Asked claude to draw"
+
+    app = start_app(Source("w1:p1", agent="claude", cwd=tmp_path), asker=asker)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await wait_for(pilot, lambda: app.notice == "Asked claude to draw")
+        assert asked == ["w1:p1"]
+        header = header_text(app)
+        assert "Asked claude to draw" in header and "⚠" not in header
+
+
+async def test_a_failed_ask_is_a_warning(tmp_path):
+    app = start_app(
+        Source("w1:p1", agent="claude", cwd=tmp_path),
+        asker=lambda source: (False, "claude is waiting for your answer"),
+    )
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await wait_for(pilot, lambda: app.notice == "claude is waiting for your answer")
+        assert "⚠" in header_text(app)
+
+
+async def test_o_picks_a_file_from_the_folder_and_draws_it(tmp_path):
+    (tmp_path / "docs").mkdir()
+    flow = tmp_path / "docs" / "flow.md"
+    flow.write_text("# Flow\n\n```mermaid\ngraph LR\n  A --> B\n```\n", encoding="utf-8")
+    readme = tmp_path / "README.md"
+    readme.write_text("# Readme", encoding="utf-8")
+    folders = []
+
+    def finder(folder):
+        folders.append(folder)
+        return [readme, flow]
+
+    app = start_app(Source("w1:p1", agent="claude", cwd=tmp_path), finder=finder)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await wait_for(pilot, lambda: isinstance(app.screen, FilePicker) and app.screen.query_one(OptionList).option_count == 2)
+        assert folders == [tmp_path]
+        await pilot.press("j", "enter")
+        await wait_for(pilot, lambda: app.current is not None)
+        assert (app.current.title, app.current.path, app.current.sent_by, app.current.draw) == (
+            "docs/flow.md", flow, "you", True,
+        )
+        assert "from you" in header_text(app)
+
+
+async def test_the_file_picker_closes_with_escape(tmp_path):
+    app = start_app(Source("w1:p1", cwd=tmp_path), finder=lambda folder: [])
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await wait_for(pilot, lambda: isinstance(app.screen, FilePicker))
+        await wait_for(pilot, lambda: "No Markdown or Mermaid files" in str(app.screen.query_one("#files-status", Static).content))
+        await pilot.press("escape")
+        await wait_for(pilot, lambda: not isinstance(app.screen, FilePicker))
+        assert app.query(StartView) and app.current is None
+
+
+async def test_a_failing_file_search_does_not_close_the_viewer(tmp_path):
+    def broken(folder):
+        raise PermissionError("no access")
+
+    app = start_app(Source("w1:p1", cwd=tmp_path), finder=broken)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await wait_for(pilot, lambda: isinstance(app.screen, FilePicker))
+        await wait_for(pilot, lambda: "Cannot list" in str(app.screen.query_one("#files-status", Static).content))
         assert app.is_running

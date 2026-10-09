@@ -51,6 +51,32 @@ def send(message: dict, workspace: str | None = None) -> Path:
     return final
 
 
+# The pane id of the viewer reading this inbox, so `open` can focus it instead of
+# opening a second one. Not .json, so it is never read as a message.
+VIEWER_FILE = "viewer.pane"
+
+
+def mark_viewer(pane_id: str, workspace: str | None = None) -> None:
+    folder = inbox_dir(workspace)
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / f".{VIEWER_FILE}.{os.getpid()}.tmp"
+    tmp.write_text(pane_id, encoding="utf-8")
+    os.replace(tmp, folder / VIEWER_FILE)
+
+
+def viewer_pane(workspace: str | None = None) -> str | None:
+    try:
+        return (inbox_dir(workspace) / VIEWER_FILE).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def clear_viewer(pane_id: str, workspace: str | None = None) -> None:
+    """Forget the viewer, unless a newer one has taken its place."""
+    if viewer_pane(workspace) == pane_id:
+        (inbox_dir(workspace) / VIEWER_FILE).unlink(missing_ok=True)
+
+
 def _sent_at(data: dict, now: float) -> float:
     try:
         return float(data.get("sent_at", now))

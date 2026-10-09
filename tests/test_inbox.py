@@ -95,3 +95,25 @@ async def test_on_start_only_the_newest_waiting_item_is_shown():
     await messages.aclose()
     assert item.title == "Second"
     assert list(inbox.inbox_dir().glob("*.json")) == []
+
+
+# --- the open viewer ----------------------------------------------------------------
+
+def test_a_viewer_records_its_pane_and_clears_it_on_close():
+    assert inbox.viewer_pane() is None
+    inbox.mark_viewer("w1:pA")
+    assert inbox.viewer_pane() == "w1:pA"
+    inbox.clear_viewer("w1:pA")
+    assert inbox.viewer_pane() is None
+
+
+def test_closing_an_older_viewer_keeps_the_newer_record():
+    inbox.mark_viewer("w1:pA")
+    inbox.mark_viewer("w1:pB")
+    inbox.clear_viewer("w1:pA")
+    assert inbox.viewer_pane() == "w1:pB"
+
+
+def test_the_viewer_record_is_not_a_message():
+    inbox.mark_viewer("w1:pA")
+    assert inbox._pending(inbox.inbox_dir()) == []

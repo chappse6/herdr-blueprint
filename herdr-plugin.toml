@@ -1,6 +1,6 @@
 id = "seeun.blueprint"
 name = "Blueprint"
-version = "0.3.0"
+version = "0.4.0"
 min_herdr_version = "0.9.3"
 description = "Shows the latest doc or diagram your agent sends in the side pane, drawn on request."
 platforms = ["macos", "linux", "windows"]
