@@ -103,3 +103,30 @@ def test_install_skill_command_uses_home(tmp_path, monkeypatch, capsys):
     assert (home / ".claude/skills/blueprint").exists()
     assert cli.main(["uninstall-skill"]) == 0
     assert not (home / ".claude/skills/blueprint").exists()
+
+
+def test_focused_pane_decodes_herdr_output_as_utf8(tmp_path):
+    seen = {}
+
+    def run(cmd, **kwargs):
+        seen.update(kwargs)
+        out = json.dumps({"result": {"pane": {"pane_id": "w1:p1", "cwd": str(tmp_path), "terminal_title": "주문"}}})
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+    cli.focused_pane("herdr", None, run=run)
+    assert seen.get("encoding") == "utf-8"
+    assert seen.get("errors") == "replace"
+
+
+def test_draw_reads_stdin_as_utf8_whatever_the_locale(monkeypatch):
+    stdin = io.TextIOWrapper(io.BytesIO("graph LR\n  A[주문] --> B[결제]\n".encode("utf-8")), encoding="cp1252")
+    monkeypatch.setattr("sys.stdin", stdin)
+    assert cli.main(["draw"]) == 0
+    assert "주문" in messages()[0]["source"]
+
+
+def test_draw_does_not_crash_printing_to_a_narrow_encoding(monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO("graph LR\n  A --> B\n"))
+    out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr("sys.stdout", out)
+    assert cli.main(["draw", "--title", "주문 흐름"]) == 0

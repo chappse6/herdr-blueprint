@@ -74,3 +74,22 @@ def test_read_cuts_large_diagrams_without_notice(tmp_path, monkeypatch):
     diagram = tmp_path / "big.mmd"
     diagram.write_text("b" * 50, encoding="utf-8")
     assert Item(kind="file", title="big.mmd", path=diagram).read() == "b" * 10
+
+
+def test_read_replaces_control_characters(tmp_path):
+    doc = tmp_path / "log.md"
+    doc.write_text("red \x1b[31mtext\x07 end\x9b", encoding="utf-8")
+    text = Item(kind="file", title="log.md", path=doc).read()
+    assert "\x1b" not in text and "\x07" not in text and "\x9b" not in text
+    assert text.count("�") == 3
+
+
+def test_read_keeps_newlines_and_tabs_and_normalizes_crlf(tmp_path):
+    doc = tmp_path / "win.md"
+    doc.write_bytes(b"a\r\nb\tc\rd\n")
+    assert Item(kind="file", title="win.md", path=doc).read() == "a\nb\tc\nd\n"
+
+
+def test_mermaid_sources_are_cleaned():
+    item = Item(kind="mermaid", title="x", source="graph LR\n  A[\x1b]0;evil\x07] --> B")
+    assert "\x1b" not in item.read()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -9,14 +10,15 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Footer, OptionList, Static
 from textual.widgets.option_list import Option
 
 from . import config as config_store
-from .document import DiagramView, DocumentView
-from .history import History, Item
+from .document import DiagramView, DocumentView, PlainView
+from .history import History, Item, clean, is_large
 from .sources.follow import follow
 from .sources.inbox import watch_inbox
 from .themes import PALETTES, get_palette, palette_for_theme
@@ -108,6 +110,9 @@ class BlueprintApp(App[None]):
         self.settings = settings or config_store.load()
         self.history = History()
         self.notice: str | None = None
+        self.title_text = "Welcome"
+        # Follow, inbox and keys all open items; one render at a time.
+        self._render_lock = asyncio.Lock()
         for palette in PALETTES.values():
             self.register_theme(palette.textual_theme())
 
@@ -124,59 +129,91 @@ class BlueprintApp(App[None]):
         self.theme = get_palette(self.settings.theme).theme_name
         self.following = self.settings.follow
         await self._render_text(WELCOME, diagram=False)
-        self.query_one("#source", Static).update("Welcome")
-        self.run_worker(self._follow_files(), exclusive=False)
-        self.run_worker(self._read_inbox(), exclusive=False)
+        self._update_status()
+        self.run_worker(self._follow_files(), exclusive=False, exit_on_error=False)
+        self.run_worker(self._read_inbox(), exclusive=False, exit_on_error=False)
         self.set_interval(30, self._update_status)
 
     # Sources ---------------------------------------------------------------
 
+    # A broken source must not close the viewer: say so in the header instead.
+
     async def _follow_files(self) -> None:
-        async for item in follow(self.root):
-            if self.following:
-                await self.open_item(self.history.push(item))
-            else:
-                self.history.push(item, focus=False)
-                self._update_tabs()
+        try:
+            async for item in follow(self.root):
+                if self.following:
+                    await self.open_item(self.history.push(item))
+                else:
+                    self.history.push(item, focus=False)
+                    self._update_tabs()
+        except Exception as exc:
+            self._show_notice(f"Follow stopped: {exc}")
 
     async def _read_inbox(self) -> None:
-        async for item in watch_inbox():
-            await self.open_item(self.history.push(item))
+        try:
+            async for item in watch_inbox():
+                await self.open_item(self.history.push(item))
+        except Exception as exc:
+            self._show_notice(f"Inbox stopped: {exc}")
+
+    def _show_notice(self, message: str) -> None:
+        self.notice = message
+        self._update_status()
 
     # Rendering -------------------------------------------------------------
 
     async def open_item(self, item: Item | None) -> None:
         if item is None:
             return
-        try:
-            text = item.read()
-        except OSError:
-            # Keep the last content on screen; say what went wrong in the header.
-            self.notice = f"Cannot read {item.title}"
+        async with self._render_lock:
+            try:
+                text = item.read()
+            except OSError:
+                # Keep the last content on screen; say what went wrong in the header.
+                self._show_notice(f"Cannot read {clean(item.title)}")
+                return
+            plain = not item.is_diagram and is_large(text)
+            self.notice = "Large file, shown as plain text" if plain else None
+            await self._render_text(text, diagram=item.is_diagram, plain=plain)
+            self.title_text = clean(item.title)
             self._update_status()
-            return
-        self.notice = None
-        await self._render_text(text, diagram=item.is_diagram)
-        self.query_one("#source", Static).update(item.title)
-        self._update_status()
-        self._update_tabs()
+            self._update_tabs()
 
-    async def _render_text(self, text: str, diagram: bool) -> None:
+    async def _render_text(self, text: str, diagram: bool, plain: bool = False) -> None:
         body = self.query_one("#body", VerticalScroll)
         await body.remove_children()
-        await body.mount(DiagramView(text) if diagram else DocumentView(text))
+        if plain:
+            view = PlainView()
+            await body.mount(view)
+            await view.load(text)
+        else:
+            await body.mount(DiagramView(text) if diagram else DocumentView(text))
         body.scroll_home(animate=False)
 
     def _update_status(self) -> None:
+        try:
+            brand = self.query_one("#brand", Static)
+            source = self.query_one("#source", Static)
+            status_bar = self.query_one("#status", Static)
+        except NoMatches:
+            return  # a timer or resize fired while the app was closing
         # Side panes are often ~40 columns: keep the title readable by
-        # hiding the brand and shortening the status.
+        # hiding the brand and shortening the status. A notice then takes
+        # the title's place so its text stays visible.
         narrow = self.size.width < NARROW_WIDTH
-        self.query_one("#brand", Static).display = not narrow
+        brand.display = not narrow
         palette = palette_for_theme(self.theme)
+        warning = f"bold {palette.warning}"
+        if narrow and self.notice:
+            source.update(Text(f"⚠ {self.notice}", style=warning))
+        else:
+            source.update(Text(self.title_text))
         item = self.history.current
         status = Text()
-        if self.notice:
-            status.append("⚠ " if narrow else f"⚠ {self.notice}   ", style=f"bold {palette.warning}")
+        if self.notice and not narrow:
+            status.append(f"⚠ {self.notice}   ", style=warning)
+        elif self.notice:
+            pass
         elif item and narrow:
             status.append(f"{ago(item.at).removesuffix(' ago').replace('just ', '')} ")
         elif item:
@@ -186,7 +223,7 @@ class BlueprintApp(App[None]):
             status.append("◉" if self.following else "○")
         else:
             status.append("◉ follow" if self.following else "○ paused")
-        self.query_one("#status", Static).update(status)
+        status_bar.update(status)
 
     def on_resize(self) -> None:
         if self.is_mounted:
@@ -198,7 +235,7 @@ class BlueprintApp(App[None]):
         for i, item in enumerate(self.history.items):
             if tabs:
                 tabs.append(" · ", style=palette.muted)
-            label = ("✎ " if item.kind == "mermaid" else "") + item.title
+            label = ("✎ " if item.kind == "mermaid" else "") + clean(item.title)
             current = i == self.history.index
             tabs.append(label, style=f"bold {palette.accent}" if current else palette.muted)
         self.query_one("#tabs", Static).update(tabs)

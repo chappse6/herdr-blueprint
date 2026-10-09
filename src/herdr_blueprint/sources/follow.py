@@ -37,7 +37,8 @@ async def follow(root: Path, debounce_ms: int = 300) -> AsyncIterator[Item]:
     def keep(change: Change, raw: str) -> bool:
         return change != Change.deleted and is_viewable(Path(raw), root)
 
-    async for changes in awatch(root, watch_filter=keep, debounce=debounce_ms):
+    # Unreadable subfolders (e.g. root-owned data dirs on Linux) must not stop following.
+    async for changes in awatch(root, watch_filter=keep, debounce=debounce_ms, ignore_permission_denied=True):
         newest = max((Path(raw) for _, raw in changes), key=_mtime)
         title = newest.relative_to(root).as_posix()
         yield Item(kind="file", title=title, path=newest, sent_by="follow")

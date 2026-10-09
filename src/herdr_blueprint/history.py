@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,25 @@ VIEWABLE_SUFFIXES = DIAGRAM_SUFFIXES | DOCUMENT_SUFFIXES
 
 # Larger files are cut so a huge generated doc can't freeze the viewer.
 MAX_BYTES = 1_000_000
+
+# Documents past either limit are shown as plain text: Textual lays out one
+# widget per Markdown block, which takes seconds for big generated docs.
+LARGE_DOC_CHARS = 100_000
+LARGE_DOC_LINES = 2_000
+
+# C0 controls except tab and newline, plus DEL and C1: these would reach the
+# terminal as raw escape sequences.
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def clean(text: str) -> str:
+    """Normalize line endings and replace control characters with U+FFFD."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return _CONTROL.sub("\ufffd", text)
+
+
+def is_large(text: str) -> bool:
+    return len(text) > LARGE_DOC_CHARS or text.count("\n") > LARGE_DOC_LINES
 
 
 @dataclass(frozen=True)
@@ -37,14 +57,14 @@ class Item:
         crash the viewer. Documents get a notice; diagrams stay valid Mermaid.
         """
         if self.kind == "mermaid":
-            return self.source or ""
+            return clean(self.source or "")
         assert self.path is not None
         with self.path.open("rb") as handle:
             data = handle.read(MAX_BYTES + 1)
         text = data[:MAX_BYTES].decode("utf-8", errors="replace")
         if len(data) > MAX_BYTES and not self.is_diagram:
             text += f"\n\n> This file is large. Showing the first {MAX_BYTES:,} bytes.\n"
-        return text
+        return clean(text)
 
 
 class History:

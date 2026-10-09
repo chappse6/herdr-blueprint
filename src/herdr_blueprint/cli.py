@@ -55,7 +55,8 @@ def focused_pane(herdr: str, pane_id: str | None, run=subprocess.run) -> tuple[s
     """Pane id and folder of `pane_id`, or of the focused pane when it is None."""
     cmd = [herdr, "pane", "get", pane_id] if pane_id else [herdr, "pane", "current"]
     try:
-        result = run(cmd, capture_output=True, text=True)
+        # herdr prints UTF-8; Windows would otherwise decode with the ANSI code page.
+        result = run(cmd, capture_output=True, encoding="utf-8", errors="replace")
     except OSError:
         return pane_id, None
     if result.returncode != 0:
@@ -102,7 +103,21 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def read_stdin() -> str:
+    """stdin as UTF-8 whatever the console code page is."""
+    raw = getattr(sys.stdin, "buffer", None)
+    if raw is None:
+        return sys.stdin.read()
+    return raw.read().decode("utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    # A narrow console encoding must not turn a sent message into a crash.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     args = _parser().parse_args(argv)
 
     if args.command == "show":
@@ -118,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "draw":
-        source = sys.stdin.read().strip()
+        source = read_stdin().strip()
         if not source:
             print("herdr-blueprint: no Mermaid on stdin", file=sys.stderr)
             return 2

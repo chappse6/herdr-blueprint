@@ -21,3 +21,21 @@ def test_hidden_and_build_folders_are_skipped():
 
 def test_files_outside_root_are_skipped():
     assert not is_viewable(Path("/elsewhere/a.md"), ROOT)
+
+
+async def test_follow_reports_a_saved_file(tmp_path):
+    import asyncio
+
+    from herdr_blueprint.sources.follow import follow
+
+    async def save_later():
+        await asyncio.sleep(0.5)
+        (tmp_path / "notes.md").write_text("# Notes", encoding="utf-8")
+
+    events = follow(tmp_path, debounce_ms=50)
+    writer = asyncio.create_task(save_later())
+    item = await asyncio.wait_for(anext(events), timeout=10)
+    await events.aclose()
+    await writer
+    assert item.path.name == "notes.md"
+    assert item.title == "notes.md"

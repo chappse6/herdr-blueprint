@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from rich.cells import cell_len
 from rich.text import Text
 from termaid import render_rich
 from termaid.renderer import themes as termaid_themes
 
-from .themes import Palette
+from .themes import PALETTES, Palette
 
 # From roomy to compact: (padding_x, padding_y, gap). The first one that fits wins.
 _LAYOUTS = [(4, 2, 4), (2, 1, 3), (1, 0, 2)]
+
+# termaid gets slow fast: a 200-node tree takes ~9 s. Larger sources are shown as text.
+MAX_DIAGRAM_CHARS = 10_000
 
 
 class DiagramError(Exception):
@@ -37,15 +42,20 @@ def _register(palette: Palette) -> None:
     )
 
 
-def render_diagram(source: str, palette: Palette, max_width: int | None = None) -> Text:
-    """Draw Mermaid source as styled text that fits `max_width` when possible."""
-    _register(palette)
+for _palette in PALETTES.values():
+    _register(_palette)
+
+
+@lru_cache(maxsize=64)
+def _render(source: str, theme_name: str, max_width: int | None) -> Text:
+    # Cached because a diagram is redrawn on mount, theme change and resize.
+    # Callers must not modify the returned Text.
     text = Text()
     for padding_x, padding_y, gap in _LAYOUTS:
         try:
             text = render_rich(
                 source,
-                theme=palette.theme_name,
+                theme=theme_name,
                 padding_x=padding_x,
                 padding_y=padding_y,
                 gap=gap,
@@ -57,3 +67,15 @@ def render_diagram(source: str, palette: Palette, max_width: int | None = None) 
     if not text.plain.strip():
         raise DiagramError("termaid returned no output")
     return text
+
+
+def render_diagram(source: str, palette: Palette, max_width: int | None = None) -> Text:
+    """Draw Mermaid source as styled text that fits `max_width` when possible."""
+    if len(source) > MAX_DIAGRAM_CHARS:
+        raise DiagramError(
+            f"This diagram is too large to draw ({len(source):,} characters, "
+            f"limit {MAX_DIAGRAM_CHARS:,})"
+        )
+    if palette.theme_name not in termaid_themes.THEMES:
+        _register(palette)
+    return _render(source, palette.theme_name, max_width)

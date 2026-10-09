@@ -27,3 +27,17 @@ def test_wide_characters_count_as_two_columns():
 def test_empty_output_is_an_error():
     with pytest.raises(DiagramError):
         render_diagram("   ", PALETTE)
+
+
+def test_large_diagrams_are_refused_with_a_message():
+    from herdr_blueprint.diagram import MAX_DIAGRAM_CHARS
+
+    source = "graph TD\n" + "".join(f"  N{i} --> N{i + 1}\n" for i in range(MAX_DIAGRAM_CHARS // 10))
+    with pytest.raises(DiagramError, match="too large"):
+        render_diagram(source, PALETTE)
+
+
+def test_repeated_draws_are_cached():
+    first = render_diagram("graph LR\n  Cache --> Hit", PALETTE, max_width=60)
+    second = render_diagram("graph LR\n  Cache --> Hit", PALETTE, max_width=60)
+    assert first is second
