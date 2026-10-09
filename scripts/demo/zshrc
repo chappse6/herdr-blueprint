@@ -1,0 +1,5 @@
+# Shell for the demo herdr: a plain prompt, nothing personal.
+PROMPT='%F{#c4a7e7}%~%f %F{#9ccfd8}❯%f '
+alias blueprint=herdr-blueprint
+# No personal hooks or status line; tools allowed in this sandbox project.
+alias claude="command claude --settings '{\"disableAllHooks\":true}' --allowedTools 'Bash,Read,Glob,Grep,Skill'"

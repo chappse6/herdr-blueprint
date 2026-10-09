@@ -1,0 +1,24 @@
+onboarding = false
+
+[theme]
+name = "rose-pine"
+auto_switch = false
+
+[keys]
+prefix = "ctrl+a"
+
+[ui]
+pane_borders = "always"
+show_agent_labels_on_pane_borders = true
+
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", "workspace", "tab"],
+  ["$task"],
+]
+
+[[keys.command]]
+key = "prefix+d"
+type = "plugin_action"
+command = "seeun.blueprint.open"
+description = "open Blueprint"

@@ -14,8 +14,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/document.png" width="49%" alt="Blueprint showing a Markdown document with a Mermaid flowchart">
-  <img src="docs/screenshots/blueprint-theme.png" width="49%" alt="The same document in the Blueprint theme">
+  <img src="docs/screenshots/herdr-demo.png" alt="herdr with Claude Code on the left explaining a login flow and Blueprint on the right drawing it as a sequence diagram">
+  <br>
+  <sub>Claude Code explains a login flow. Blueprint draws it next to the chat.</sub>
 </p>
 
 Blueprint is a [herdr](https://herdr.dev) plugin. Put it next to your coding
@@ -31,6 +32,16 @@ in your terminal with colors that match your theme.
   from that folder.
 - **Themes.** Press `t` to pick a theme. Only your theme is saved.
 - **Runs everywhere.** macOS, Linux and Windows. No browser, no images.
+
+## Next to your agent
+
+Opened next to an agent, Blueprint starts with what it can do there: ask the
+agent to draw its task (`a`), or open a doc from its folder (`o`).
+
+<p align="center">
+  <img src="docs/screenshots/start-screen.png" width="49%" alt="Start screen showing the agent next to Blueprint, its task and folder">
+  <img src="docs/screenshots/file-picker.png" width="49%" alt="File picker listing the folder's Markdown and Mermaid files, newest first">
+</p>
 
 ## Install
 
@@ -98,6 +109,11 @@ to pick it up. Undo with `herdr-blueprint uninstall-skill`.
 Rosé Pine (default), Blueprint, Catppuccin Mocha, Tokyo Night, Nord, Gruvbox
 and Dracula. Your choice is saved.
 
+<p align="center">
+  <img src="docs/screenshots/document.png" width="49%" alt="A Markdown document with a Mermaid flowchart in Rosé Pine">
+  <img src="docs/screenshots/blueprint-theme.png" width="49%" alt="The same document in the Blueprint theme">
+</p>
+
 <img src="docs/screenshots/theme-picker.png" width="60%" alt="Theme picker with live preview">
 
 ## Development
@@ -108,6 +124,9 @@ uv run pytest
 uv run herdr-blueprint            # run outside herdr
 herdr plugin link "$PWD"          # use this folder as the plugin
 ```
+
+README images come from `scripts/screenshots.py` (themes) and
+[`scripts/demo`](scripts/demo/README.md) (herdr with an agent).
 
 ## Credits
 

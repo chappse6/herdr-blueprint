@@ -1,0 +1,8 @@
+stateDiagram-v2
+  [*] --> Active: code exchanged
+  Active --> Rotated: refresh token used
+  Rotated --> Active: new token issued
+  Rotated --> Revoked: old token reused
+  Active --> Expired: 30 days unused
+  Revoked --> [*]
+  Expired --> [*]
