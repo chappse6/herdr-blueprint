@@ -1,6 +1,6 @@
 id = "seeun.blueprint"
 name = "Blueprint"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.9.3"
 description = "Live Markdown and Mermaid viewer for the side pane. Follows the docs your agent writes."
 platforms = ["macos", "linux", "windows"]
