@@ -143,3 +143,9 @@ def test_install_skill_command_uses_home(tmp_path, monkeypatch, capsys):
     assert (home / ".claude/skills/blueprint").exists()
     assert cli.main(["uninstall-skill"]) == 0
     assert not (home / ".claude/skills/blueprint").exists()
+
+
+def test_send_drops_a_utf8_bom(monkeypatch):
+    monkeypatch.setattr("sys.stdin", utf8_stdin("﻿graph LR\n  A --> B\n"))
+    assert cli.main(["send", "--draw"]) == 0
+    assert messages()[0]["source"].startswith("graph LR")

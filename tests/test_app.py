@@ -396,3 +396,36 @@ async def test_a_wide_diagram_opens_scrolled_to_the_left():
         body = app.query_one("#body")
         assert body.max_scroll_x > 0
         assert body.scroll_x == 0
+
+
+# --- second review fixes ----------------------------------------------------------------
+
+async def test_r_during_a_send_keeps_the_new_item(tmp_path):
+    old = tmp_path / "a.md"
+    old.write_text("# A", encoding="utf-8")
+    app = make_app()
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="file", title="a.md", path=old))
+        new = Item(kind="markdown", title="B", source="# B\n\n" + "text\n\n" * 200)
+        sending = asyncio.create_task(app.open_item(new))
+        await asyncio.sleep(0)  # the send has started and holds the render lock
+        await app.action_reload()
+        await sending
+        await pilot.pause()
+        assert app.current.title == "B"
+        assert str(app.query_one("#source").render()) == "B"
+
+
+async def test_a_drawn_diagram_over_the_limit_shows_as_text_without_freezing():
+    from herdr_blueprint.diagram import MAX_DIAGRAM_CHARS
+
+    huge = "graph TD\n" + "".join(f"  N{i} --> N{i + 1}\n" for i in range(MAX_DIAGRAM_CHARS // 5))
+    app = make_app()
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        item = Item(kind="mermaid", title="Huge", source=huge, draw=True)
+        gap = await largest_pause(pilot, lambda: app.open_item(item), settle=0.5)
+        assert gap < 0.5
+        assert not app.query(DiagramView)
+        assert "too large to draw" in str(app.query_one("#status").render())

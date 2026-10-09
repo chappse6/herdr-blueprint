@@ -29,14 +29,17 @@ _MERMAID_STARTS = (
     "graph", "flowchart", "sequenceDiagram", "classDiagram", "stateDiagram",
     "erDiagram", "journey", "gantt", "pie", "quadrantChart", "requirementDiagram",
     "gitGraph", "mindmap", "timeline", "sankey", "xychart", "block", "packet",
-    "kanban", "architecture", "zenuml", "C4Context", "C4Container", "C4Component",
+    "kanban", "architecture", "zenuml", "radar", "treemap",
+    "C4Context", "C4Container", "C4Component", "C4Dynamic", "C4Deployment",
 )
+# Variants such as stateDiagram-v2, xychart-beta, flowchart-elk.
+_MERMAID_SUFFIXES = ("", "-v2", "-beta", "-elk")
 
 
 def clean(text: str) -> str:
     """Normalize line endings and replace control characters with U+FFFD."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return _CONTROL.sub("�", text)
+    return _CONTROL.sub("\ufffd", text)
 
 
 def is_large(text: str) -> bool:
@@ -44,13 +47,20 @@ def is_large(text: str) -> bool:
 
 
 def looks_like_mermaid(source: str) -> bool:
-    """True when the first line that is not blank or a %% comment opens a diagram."""
-    for line in source.splitlines():
+    """True when the first line after front matter, blanks and %% lines opens a diagram."""
+    lines = source.lstrip("\ufeff").splitlines()
+    # Mermaid front matter: a block between two "---" lines before the diagram.
+    first_text = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first_text is not None and lines[first_text].strip() == "---":
+        closing = next((i for i in range(first_text + 1, len(lines)) if lines[i].strip() == "---"), None)
+        if closing is None:
+            return False
+        lines = lines[closing + 1 :]
+    for line in lines:
         words = line.split()
         if not words or words[0].startswith("%%"):
             continue
-        first = words[0]
-        return any(first == start or first.startswith(start + "-") for start in _MERMAID_STARTS)
+        return words[0] in {start + suffix for start in _MERMAID_STARTS for suffix in _MERMAID_SUFFIXES}
     return False
 
 
@@ -82,7 +92,7 @@ class Item:
         assert self.path is not None
         with self.path.open("rb") as handle:
             data = handle.read(MAX_BYTES + 1)
-        text = data[:MAX_BYTES].decode("utf-8", errors="replace")
+        text = data[:MAX_BYTES].decode("utf-8-sig", errors="replace")
         if len(data) > MAX_BYTES and not self.is_diagram:
             text += f"\n\n> This file is large. Showing the first {MAX_BYTES:,} bytes.\n"
         return clean(text)

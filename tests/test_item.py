@@ -77,3 +77,25 @@ def test_read_keeps_newlines_and_tabs_and_normalizes_crlf(tmp_path):
 def test_snippets_are_cleaned():
     assert "\x1b" not in Item(kind="mermaid", title="x", source="graph LR\n  A[\x1b]0;x\x07] --> B").read()
     assert "\x1b" not in Item(kind="markdown", title="x", source="# Hi \x1b[2J").read()
+
+
+def test_mermaid_front_matter_and_bom_are_recognised():
+    assert looks_like_mermaid("---\ntitle: Order flow\n---\nflowchart LR\n  A --> B")
+    assert looks_like_mermaid("﻿graph LR\n  A --> B")
+    assert looks_like_mermaid("%%{init: {'theme': 'dark'}}%%\nsequenceDiagram\n  A->>B: hi")
+
+
+def test_newer_diagram_keywords_are_recognised():
+    for first in ["C4Dynamic", "C4Deployment", "radar-beta", "treemap-beta", "flowchart-elk TD"]:
+        assert looks_like_mermaid(f"{first}\n  x"), first
+
+
+def test_prose_that_starts_like_a_keyword_is_not_mermaid():
+    for source in ["graph-based search is fast", "block-level elements", "pie-chart ideas", "---\nnot front matter"]:
+        assert not looks_like_mermaid(source), source
+
+
+def test_read_drops_a_utf8_bom(tmp_path):
+    doc = tmp_path / "bom.md"
+    doc.write_bytes("﻿# Title".encode("utf-8"))
+    assert Item(kind="file", title="bom.md", path=doc).read() == "# Title"

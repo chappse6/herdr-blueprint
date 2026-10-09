@@ -16,6 +16,7 @@ from textual.widgets import Footer, OptionList, Static
 from textual.widgets.option_list import Option
 
 from . import config as config_store
+from .diagram import MAX_DIAGRAM_CHARS
 from .document import DiagramView, DocumentView, PlainView, as_code
 from .item import Item, clean, is_large
 from .sources.inbox import Refresh, watch_inbox
@@ -140,24 +141,37 @@ class BlueprintApp(App[None]):
     async def open_item(self, item: Item) -> None:
         """Replace the screen with `item`. The previous one is dropped."""
         async with self._render_lock:
-            try:
-                text = item.read()
-            except OSError:
-                # Keep the last content on screen; say what went wrong in the header.
-                self._show_notice(f"Cannot read {clean(item.title)}")
-                return
-            drawn_diagram = item.is_diagram and item.draw
-            plain = not drawn_diagram and is_large(text)
-            self.notice = "Large file, shown as plain text" if plain else None
-            await self._render_text(text, diagram=item.is_diagram, draw=item.draw, plain=plain)
-            self.current = item
-            self.title_text = clean(item.title)
-            self._update_status()
+            await self._open_locked(item)
 
     async def refresh_current(self, draw: bool) -> None:
         """Re-read and redraw what is on screen, with the worker's draw flag."""
-        if self.current is not None:
-            await self.open_item(replace(self.current, draw=draw, at=time.time()))
+        # Read `current` under the lock, so a send in progress is not undone.
+        async with self._render_lock:
+            if self.current is not None:
+                await self._open_locked(replace(self.current, draw=draw, at=time.time()))
+
+    async def _open_locked(self, item: Item) -> None:
+        try:
+            text = item.read()
+        except OSError:
+            # Keep the last content on screen; say what went wrong in the header.
+            self._show_notice(f"Cannot read {clean(item.title)}")
+            return
+        # termaid refuses big diagrams anyway; show them as text right away
+        # instead of drawing a long error.
+        too_big = item.is_diagram and item.draw and len(text) > MAX_DIAGRAM_CHARS
+        draw = item.draw and not too_big
+        plain = not (item.is_diagram and draw) and is_large(text)
+        if too_big:
+            self.notice = "Diagram too large to draw, shown as text"
+        elif plain:
+            self.notice = "Large file, shown as plain text"
+        else:
+            self.notice = None
+        await self._render_text(text, diagram=item.is_diagram, draw=draw, plain=plain)
+        self.current = item
+        self.title_text = clean(item.title)
+        self._update_status()
 
     async def _render_text(self, text: str, *, diagram: bool, draw: bool, plain: bool) -> None:
         body = self.query_one("#body", VerticalScroll)
@@ -216,5 +230,6 @@ class BlueprintApp(App[None]):
         self.push_screen(ThemePicker(self.theme), chosen)
 
     async def action_reload(self) -> None:
-        if self.current is not None:
-            await self.open_item(self.current)
+        async with self._render_lock:
+            if self.current is not None:
+                await self._open_locked(self.current)

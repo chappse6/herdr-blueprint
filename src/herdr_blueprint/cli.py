@@ -51,7 +51,7 @@ def read_stdin() -> str:
     raw = getattr(sys.stdin, "buffer", None)
     if raw is None:
         return sys.stdin.read()
-    return raw.read().decode("utf-8", errors="replace")
+    return raw.read().decode("utf-8-sig", errors="replace")
 
 
 def _parser() -> argparse.ArgumentParser:
