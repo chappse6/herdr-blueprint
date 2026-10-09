@@ -57,8 +57,13 @@ root=$(herdr plugin list --json | jq -r '.result.plugins[] | select(.plugin_id =
 uv run --project "$root" --no-sync herdr-blueprint draw --title "Flow" < flow.mmd
 ```
 
-The `skills/blueprint` folder has a skill that teaches Claude Code and Codex
-to do this.
+Teach Claude Code and Codex to send diagrams on their own:
+
+    herdr plugin action invoke seeun.blueprint.install-skill
+
+This links `skills/blueprint` into `~/.claude/skills` and `~/.agents/skills`
+(a copy on Windows when symlinks are not allowed). Start a new agent session
+to pick it up. Undo with `herdr-blueprint uninstall-skill`.
 
 ## Themes
 

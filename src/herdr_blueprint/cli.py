@@ -97,6 +97,8 @@ def _parser() -> argparse.ArgumentParser:
     draw = commands.add_parser("draw", help="send Mermaid from stdin to the viewer")
     draw.add_argument("--title", default="Diagram", help="label in the history bar")
     commands.add_parser("open", help="open the viewer pane in herdr")
+    commands.add_parser("install-skill", help="add the Blueprint skill to Claude Code and Codex")
+    commands.add_parser("uninstall-skill", help="remove the Blueprint skill")
     return parser
 
 
@@ -122,6 +124,17 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         inbox.send({"kind": "mermaid", "source": source, "title": args.title, "sent_by": "agent"})
         print(f"Sent to Blueprint: {args.title}")
+        return 0
+
+    if args.command in ("install-skill", "uninstall-skill"):
+        from . import skills_install
+
+        if not skills_install.SKILL_DIR.is_dir():
+            print("herdr-blueprint: skill folder not found; run from the plugin folder", file=sys.stderr)
+            return 1
+        step = skills_install.install if args.command == "install-skill" else skills_install.uninstall
+        for line in step(skills_install.SKILL_DIR, Path.home()) or ["nothing to do"]:
+            print(line)
         return 0
 
     if args.command == "open":

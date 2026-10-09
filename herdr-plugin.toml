@@ -20,3 +20,9 @@ id = "open"
 title = "Open Blueprint"
 contexts = ["workspace"]
 command = ["uv", "run", "--no-sync", "herdr-blueprint", "open"]
+
+[[actions]]
+id = "install-skill"
+title = "Add the Blueprint skill to Claude Code / Codex"
+contexts = ["workspace"]
+command = ["uv", "run", "--no-sync", "herdr-blueprint", "install-skill"]

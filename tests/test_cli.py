@@ -93,3 +93,13 @@ def test_detect_root_prefers_env(tmp_path, monkeypatch):
     monkeypatch.setenv("HERDR_BLUEPRINT_ROOT", str(tmp_path))
     monkeypatch.setenv("HERDR_PLUGIN_CONTEXT_JSON", json.dumps({"cwd": "/"}))
     assert cli.detect_root() == tmp_path
+
+
+def test_install_skill_command_uses_home(tmp_path, monkeypatch, capsys):
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+    assert cli.main(["install-skill"]) == 0
+    assert (home / ".claude/skills/blueprint").exists()
+    assert cli.main(["uninstall-skill"]) == 0
+    assert not (home / ".claude/skills/blueprint").exists()
