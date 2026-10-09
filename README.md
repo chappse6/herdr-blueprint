@@ -1,10 +1,21 @@
-# Blueprint
+<p align="center">
+  <img src="docs/logo.png" width="160" alt="Blueprint logo: a rolled-out blueprint with a terminal prompt">
+</p>
 
-Live Markdown and Mermaid for your agent's side pane.
+<h1 align="center">Blueprint</h1>
+
+<p align="center">Live Markdown and Mermaid for your agent's side pane.</p>
 
 <p align="center">
-  <img src="docs/screenshots/document.svg" width="49%" alt="Blueprint showing a Markdown document with a Mermaid flowchart">
-  <img src="docs/screenshots/blueprint-theme.svg" width="49%" alt="The same document in the Blueprint theme">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue" alt="macOS, Linux and Windows">
+  <img src="https://img.shields.io/badge/herdr-plugin-1f6feb" alt="herdr plugin">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/document.png" width="49%" alt="Blueprint showing a Markdown document with a Mermaid flowchart">
+  <img src="docs/screenshots/blueprint-theme.png" width="49%" alt="The same document in the Blueprint theme">
 </p>
 
 Blueprint is a [herdr](https://herdr.dev) plugin. Put it next to your coding
@@ -77,7 +88,7 @@ to pick it up. Undo with `herdr-blueprint uninstall-skill`.
 Rosé Pine (default), Blueprint, Catppuccin Mocha, Tokyo Night, Nord, Gruvbox
 and Dracula. Your choice is saved.
 
-<img src="docs/screenshots/theme-picker.svg" width="60%" alt="Theme picker with live preview">
+<img src="docs/screenshots/theme-picker.png" width="60%" alt="Theme picker with live preview">
 
 ## Development
 
