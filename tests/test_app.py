@@ -128,8 +128,8 @@ async def test_a_refresh_with_the_flag_draws(tmp_path):
         await app.open_item(Item(kind="file", title="flow.mmd", path=diagram))
         assert not app.query(DiagramView)
         inbox.send({"kind": "refresh", "draw": True})
-        await wait_for(pilot, lambda: bool(app.query(DiagramView)))
-        assert app.current.draw is True
+        # current is set after the view mounts, so wait for both.
+        await wait_for(pilot, lambda: app.current.draw and bool(app.query(DiagramView)))
 
 
 async def test_a_refresh_with_nothing_on_screen_is_ignored():
