@@ -18,7 +18,7 @@ between tool calls.
 ```bash
 root=$(herdr plugin list --json | jq -r '.result.plugins[] | select(.plugin_id == "seeun.blueprint") | .plugin_root')
 # Not named blueprint: a `blueprint` alias would make this a parse error.
-blueprint_cli() { uv run --project "$root" --no-sync herdr-blueprint "$@"; }
+blueprint_cli() { uv run --project "$root" --no-sync python -m herdr_blueprint "$@"; }
 
 # A diagram you write now: --draw makes Blueprint draw it
 blueprint_cli send --draw --title "Order flow" <<'EOF2'

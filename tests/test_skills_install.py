@@ -74,5 +74,28 @@ def test_uninstall_removes_links_and_copies_only(tmp_path, monkeypatch):
     assert foreign.exists()
 
 
-def test_skill_dir_points_at_the_repo_skill():
-    assert (skills_install.SKILL_DIR / "SKILL.md").is_file()
+def test_skill_dir_points_at_the_repo_skill(monkeypatch):
+    monkeypatch.delenv("HERDR_PLUGIN_ROOT", raising=False)
+    assert (skills_install.skill_dir() / "SKILL.md").is_file()
+
+
+def plugin_folder(base):
+    skill = base / "skills" / "blueprint"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: blueprint\n---\n", encoding="utf-8")
+    return skill
+
+
+def test_skill_dir_prefers_the_plugin_folder_herdr_names(tmp_path, monkeypatch):
+    # An installed copy of the package lives in .venv, far from skills/.
+    skill = plugin_folder(tmp_path / "plugin")
+    monkeypatch.setenv("HERDR_PLUGIN_ROOT", str(tmp_path / "plugin"))
+    assert skills_install.skill_dir() == skill
+
+
+def test_skill_dir_falls_back_to_the_current_folder(tmp_path, monkeypatch):
+    skill = plugin_folder(tmp_path / "plugin")
+    monkeypatch.delenv("HERDR_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(skills_install, "__file__", str(tmp_path / "venv/lib/site-packages/herdr_blueprint/skills_install.py"))
+    monkeypatch.chdir(tmp_path / "plugin")
+    assert skills_install.skill_dir() == skill

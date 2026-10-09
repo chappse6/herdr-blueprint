@@ -6,23 +6,26 @@ description = "Shows the latest doc or diagram your agent sends in the side pane
 platforms = ["macos", "linux", "windows"]
 
 # Needs uv: https://docs.astral.sh/uv/
+# herdr builds in a temporary folder and then moves the plugin, so nothing may
+# point back at the build folder: install a copy (--no-editable) and run the
+# module instead of the console script, whose first line names the old python.
 [[build]]
-command = ["uv", "sync", "--frozen", "--no-dev"]
+command = ["uv", "sync", "--frozen", "--no-dev", "--no-editable"]
 
 [[panes]]
 id = "viewer"
 title = "Blueprint"
 placement = "split"
-command = ["uv", "run", "--no-sync", "herdr-blueprint"]
+command = ["uv", "run", "--no-sync", "python", "-m", "herdr_blueprint"]
 
 [[actions]]
 id = "open"
 title = "Open Blueprint"
 contexts = ["workspace"]
-command = ["uv", "run", "--no-sync", "herdr-blueprint", "open"]
+command = ["uv", "run", "--no-sync", "python", "-m", "herdr_blueprint", "open"]
 
 [[actions]]
 id = "install-skill"
 title = "Add the Blueprint skill to Claude Code / Codex"
 contexts = ["workspace"]
-command = ["uv", "run", "--no-sync", "herdr-blueprint", "install-skill"]
+command = ["uv", "run", "--no-sync", "python", "-m", "herdr_blueprint", "install-skill"]

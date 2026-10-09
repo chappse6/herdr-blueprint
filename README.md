@@ -93,7 +93,7 @@ through the plugin folder:
 
 ```bash
 root=$(herdr plugin list --json | jq -r '.result.plugins[] | select(.plugin_id == "seeun.blueprint") | .plugin_root')
-uv run --project "$root" --no-sync herdr-blueprint send --draw --title "Flow" < flow.mmd
+uv run --project "$root" --no-sync python -m herdr_blueprint send --draw --title "Flow" < flow.mmd
 ```
 
 Teach Claude Code and Codex to send diagrams on their own:

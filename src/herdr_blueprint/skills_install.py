@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
-# The skill lives in the repo next to src/ (uv installs the project in editable mode).
-SKILL_DIR = Path(__file__).resolve().parents[2] / "skills" / "blueprint"
+
+def skill_dir() -> Path:
+    """The plugin's skills/blueprint folder.
+
+    The package may be an installed copy inside .venv, far from skills/, so look
+    in the plugin folder herdr names first, then the source tree, then here.
+    """
+    bases = [Path(__file__).resolve().parents[2], Path.cwd()]
+    if root := os.environ.get("HERDR_PLUGIN_ROOT"):
+        bases.insert(0, Path(root))
+    for base in bases:
+        folder = base / "skills" / "blueprint"
+        if (folder / "SKILL.md").is_file():
+            return folder
+    return bases[0] / "skills" / "blueprint"
 
 # Marks a copied skill as ours, for systems where symlinks are not allowed.
 MARKER = ".herdr-blueprint"

@@ -128,11 +128,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("install-skill", "uninstall-skill"):
         from . import skills_install
 
-        if not skills_install.SKILL_DIR.is_dir():
+        skill = skills_install.skill_dir()
+        if not skill.is_dir():
             print("herdr-blueprint: skill folder not found; run from the plugin folder", file=sys.stderr)
             return 1
         step = skills_install.install if args.command == "install-skill" else skills_install.uninstall
-        for line in step(skills_install.SKILL_DIR, Path.home()) or ["nothing to do"]:
+        for line in step(skill, Path.home()) or ["nothing to do"]:
             print(line)
         return 0
 
