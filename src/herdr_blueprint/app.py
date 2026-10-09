@@ -45,6 +45,7 @@ Add `--draw` to draw Mermaid. Without it, diagrams stay as text.
 |---|---|
 | `h` `j` `k` `l` | Move left, down, up, right |
 | `g` `G` | Top, bottom |
+| `ctrl+d` `ctrl+u` | Half a page down, up |
 | `t` | Change theme |
 | `r` | Reload |
 | `q` | Quit |
@@ -120,6 +121,8 @@ class BlueprintApp(App[None]):
         Binding("l", "move(1, 0)", show=False),
         Binding("g", "jump(False)", show=False),
         Binding("G", "jump(True)", show=False),
+        Binding("ctrl+d", "page(1)", show=False),
+        Binding("ctrl+u", "page(-1)", show=False),
         # Only offered when Blueprint knows the pane it was opened next to.
         Binding("a", "ask", "Ask"),
         Binding("o", "open_file", "Open"),
@@ -338,6 +341,13 @@ class BlueprintApp(App[None]):
         for fence in self.query(MarkdownFence):
             if fence.max_scroll_x > 0:
                 fence.scroll_relative(x=dx * SIDE_STEP, animate=False)
+
+    def action_page(self, direction: int) -> None:
+        """ctrl+d and ctrl+u: half a screen down or up, like vim."""
+        plain = self.query(PlainView)
+        target = plain.first() if plain else self.query_one("#body", VerticalScroll)
+        half = max(1, target.scrollable_content_region.height // 2)
+        target.scroll_relative(y=direction * half, animate=False)
 
     def action_jump(self, end: bool) -> None:
         """g to the top, G to the bottom."""

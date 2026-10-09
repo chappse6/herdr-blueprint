@@ -59,6 +59,7 @@ description = "open Blueprint"
 |---|---|
 | `h` `j` `k` `l` | Move left, down, up, right |
 | `g` `G` | Top, bottom |
+| `ctrl+d` `ctrl+u` | Half a page down, up |
 | `a` | Ask the agent next to Blueprint to draw its task |
 | `o` | Open a Markdown or Mermaid file from that pane's folder |
 | `t` | Change theme |

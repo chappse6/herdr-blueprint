@@ -514,6 +514,36 @@ async def test_j_scrolls_the_plain_view(tmp_path):
         assert app.query_one(PlainView).scroll_y == 2
 
 
+async def test_ctrl_d_and_ctrl_u_move_half_a_page():
+    app = make_app()
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="markdown", title="Long", source=LONG_DOC))
+        await pilot.pause()
+        body = app.query_one("#body")
+        half = body.scrollable_content_region.height // 2
+        assert half > 5
+        await pilot.press("ctrl+d", "ctrl+d")
+        await pilot.pause()
+        assert body.scroll_y == 2 * half
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+        assert body.scroll_y == half
+
+
+async def test_ctrl_d_moves_the_plain_view_half_a_page():
+    big = "# Log\n\n" + "\n".join(f"line {i}" for i in range(3000))
+    app = make_app()
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="markdown", title="big", source=big))
+        await pilot.pause()
+        view = app.query_one(PlainView)
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+        assert view.scroll_y == view.scrollable_content_region.height // 2 > 5
+
+
 async def test_the_footer_shows_the_move_keys():
     app = make_app()
     async with app.run_test(size=(80, 20)) as pilot:
