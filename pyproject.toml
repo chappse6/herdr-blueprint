@@ -33,3 +33,8 @@ packages = ["src/herdr_blueprint"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.uv]
+# Use uv's own Python builds only. Never probe system interpreters such as
+# macOS /usr/bin/python3, which pops up a "developer tools" install dialog.
+python-preference = "only-managed"
