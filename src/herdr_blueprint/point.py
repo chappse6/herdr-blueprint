@@ -1,0 +1,279 @@
+"""The parts of what Blueprint shows, for pointing at one: boxes in the drawing
+and lines in the source. No Textual in here.
+
+Diagram parts come from termaid's own layout, so they match the drawing. That
+layout is termaid internals (the version is pinned); every box is also checked
+against the drawn text, so a layout that doesn't line up is never offered.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, replace
+
+from rich.cells import cell_len
+from rich.style import Style
+from rich.text import Text
+
+# Message arrows in a sequence diagram source line.
+_ARROW = re.compile(r"^\s*[^%].*?(-{1,2}>>|-{1,2}>|-{1,2}x|-{1,2}\))")
+
+
+@dataclass(frozen=True)
+class Box:
+    """Cells in the drawing: columns x.. and rows y.. (wide characters take two columns)."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+    @property
+    def center(self) -> tuple[float, float]:
+        return self.x + self.width / 2, self.y + self.height / 2
+
+    def contains(self, x: int, y: int) -> bool:
+        return self.x <= x < self.x + self.width and self.y <= y < self.y + self.height
+
+
+@dataclass(frozen=True)
+class Part:
+    kind: str  # node, participant, message, diagram, or a document block kind
+    id: str
+    label: str
+    boxes: tuple[Box, ...] = ()
+    lines: tuple[int, int] | None = None  # 1-based, inclusive
+    detail: str = ""
+
+
+# --- diagrams ----------------------------------------------------------------------
+
+
+def _strip(source: str) -> str:
+    from termaid import _strip_frontmatter
+
+    return _strip_frontmatter(source.strip())
+
+
+def _kind(text: str) -> str:
+    for line in text.splitlines():
+        words = line.split()
+        if words and not words[0].startswith("%%"):
+            return words[0]
+    return ""
+
+
+def diagram_parts(source: str, padding: tuple[int, int, int], text: Text) -> list[Part]:
+    """Nodes, or participants and messages, as drawn in `text` with `padding`.
+
+    Empty for other diagrams, for sources termaid can't parse, and when the
+    parts don't line up with the drawing.
+    """
+    stripped = _strip(source)
+    kind = _kind(stripped)
+    try:
+        if kind in ("graph", "flowchart"):
+            from termaid.parser.flowchart import parse_flowchart
+
+            parts = _graph_parts(parse_flowchart(stripped), padding, source)
+        elif kind.startswith("stateDiagram"):
+            from termaid.parser.statediagram import parse_state_diagram
+
+            parts = _graph_parts(parse_state_diagram(stripped), padding, source)
+        elif kind == "sequenceDiagram":
+            parts = _sequence_parts(stripped, padding, source)
+        else:
+            return []
+    except Exception:
+        return []  # termaid could draw it, but not split it into parts
+    return _aligned(parts, text)
+
+
+def whole_diagram(source: str) -> Part:
+    return Part("diagram", "", "", (), (1, max(1, len(source.rstrip("\n").split("\n")))))
+
+
+def _graph_parts(graph, padding: tuple[int, int, int], source: str) -> list[Part]:
+    from termaid.layout.grid import compute_layout
+    from termaid.routing.router import route_edges
+
+    if not graph.node_order:
+        return []
+    # termaid lays BT and RL out as TB and LR, then flips the canvas.
+    direction = graph.direction
+    flip_v, flip_h = direction.name == "BT", direction.name == "RL"
+    if flip_v:
+        graph.direction = type(direction).TB
+    elif flip_h:
+        graph.direction = type(direction).LR
+    padding_x, padding_y, gap = padding
+    layout = compute_layout(graph, padding_x, padding_y, gap)
+    width, height = layout.canvas_width + 4, layout.canvas_height + 4
+    for routed in route_edges(graph, layout):
+        for x, y in routed.draw_path:
+            width, height = max(width, x + 2), max(height, y + 2)
+    lines = source.split("\n")
+    parts = []
+    for node_id in graph.node_order:
+        if node_id.startswith("[*]"):
+            continue  # a state diagram's start or end dot
+        placement = layout.placements[node_id]
+        box = Box(placement.draw_x, placement.draw_y, placement.draw_width, placement.draw_height)
+        if flip_h:
+            box = replace(box, x=width - box.x - box.width)
+        if flip_v:
+            box = replace(box, y=height - box.y - box.height)
+        label = getattr(graph.nodes[node_id], "label", "") or node_id
+        line = _node_line(lines, node_id)
+        parts.append(Part("node", node_id, label, (box,), (line, line) if line else None))
+    return parts
+
+
+def _sequence_parts(stripped: str, padding: tuple[int, int, int], source: str) -> list[Part]:
+    from termaid.parser.sequence import parse_sequence_diagram
+    from termaid.renderer import sequence as seq
+
+    diagram = parse_sequence_diagram(stripped)
+    flat = seq._flatten_events(diagram.events)
+    padding_x, _padding_y, gap = padding
+    # render_rich passes gap to the sequence renderer only when it isn't 4; its own default is 16.
+    centers, widths, _w, _h, header, rows, _blocks = seq._compute_layout(
+        diagram, bool(getattr(diagram, "autonumber", False)), flat, padding_x, 16 if gap == 4 else gap,
+    )
+    lines = source.split("\n")
+    index = {p.id: i for i, p in enumerate(diagram.participants)}
+    label_of = {p.id: p.label or p.id for p in diagram.participants}
+    parts = []
+    for i, participant in enumerate(diagram.participants):
+        box = Box(centers[i] - widths[i] // 2, 0, widths[i], header)
+        line = _participant_line(lines, participant.id)
+        parts.append(Part("participant", participant.id, label_of[participant.id], (box,), (line, line) if line else None))
+    message_lines = [n for n, text in enumerate(lines, 1) if _ARROW.match(text)]
+    count = 0
+    for event, row in zip(flat, rows):
+        if type(event).__name__ != "Message":
+            continue
+        left, right = sorted((centers[index[event.source]], centers[index[event.target]]))
+        box = Box(left, row - 1, max(right - left, 6) + 1, 2)
+        line = message_lines[count] if count < len(message_lines) else None
+        count += 1
+        detail = f"from {label_of[event.source]} to {label_of[event.target]}"
+        parts.append(Part("message", f"message-{count}", event.label, (box,), (line, line) if line else None, detail))
+    return parts
+
+
+def _node_line(lines: list[str], node_id: str) -> int | None:
+    word = re.escape(node_id)
+    patterns = (
+        rf"(^|[\s;&>|-]){word}\s*(\[|\(|\{{|>)",  # A[Label], A((x)), A{{x}}, A>x]
+        rf"^\s*state\s+{word}\b|^\s*{word}\s*:",  # state diagrams
+        rf"(^|\W){word}(\W|$)",  # used anywhere
+    )
+    for pattern in patterns:
+        for number, text in enumerate(lines[1:], 2):
+            if re.search(pattern, text):
+                return number
+    return None
+
+
+def _participant_line(lines: list[str], participant_id: str) -> int | None:
+    word = re.escape(participant_id)
+    for pattern in (rf"^\s*(participant|actor)\s+{word}\b", rf"(^|\W){word}(\W|$)"):
+        for number, text in enumerate(lines[1:], 2):
+            if re.search(pattern, text):
+                return number
+    return None
+
+
+def _char_at(rows: list[str], x: int, y: int) -> str:
+    if not 0 <= y < len(rows) or x < 0:
+        return " "
+    column = 0
+    for ch in rows[y]:
+        if column == x:
+            return ch
+        column += cell_len(ch)
+        if column > x:
+            return ch  # inside a wide character
+    return " "
+
+
+def _aligned(parts: list[Part], text: Text) -> list[Part]:
+    """`parts` moved onto the drawing (by at most a few cells), or [] if they don't fit it."""
+    rows = text.plain.split("\n")
+    boxed = [box for part in parts if part.kind in ("node", "participant") for box in part.boxes]
+    if not boxed:
+        return parts
+
+    def fits(dx: int, dy: int) -> bool:
+        return all(
+            _char_at(rows, b.x + dx, b.y + dy) != " "
+            and _char_at(rows, b.x + b.width - 1 + dx, b.y + b.height - 1 + dy) != " "
+            for b in boxed
+        )
+
+    shifts = sorted(((dx, dy) for dx in range(-8, 9) for dy in range(-6, 7)), key=lambda s: abs(s[0]) + abs(s[1]))
+    for dx, dy in shifts:
+        if fits(dx, dy):
+            if (dx, dy) == (0, 0):
+                return parts
+            return [
+                replace(part, boxes=tuple(replace(b, x=b.x + dx, y=b.y + dy) for b in part.boxes))
+                for part in parts
+            ]
+    return []
+
+
+# --- moving and showing --------------------------------------------------------------
+
+
+def nearest(parts: list[Part], current: int, direction: str) -> int:
+    """The part closest to `current` in `direction` (left, right, up, down), or `current`."""
+    if not parts or not parts[current].boxes:
+        return current
+    cx, cy = parts[current].boxes[0].center
+    best, best_score = current, float("inf")
+    for i, part in enumerate(parts):
+        if i == current or not part.boxes:
+            continue
+        x, y = part.boxes[0].center
+        dx, dy = x - cx, y - cy
+        ahead, aside = {"right": (dx, dy), "left": (-dx, dy), "down": (dy, dx), "up": (-dy, dx)}[direction]
+        if ahead <= 0.5:
+            continue
+        score = ahead + 2 * abs(aside)
+        if score < best_score:
+            best, best_score = i, score
+    return best
+
+
+def highlight(text: Text, part: Part, style: Style) -> Text:
+    """A copy of `text` with `style` over the part's boxes."""
+    lines = text.split("\n")
+    for box in part.boxes:
+        for y in range(box.y, box.y + box.height):
+            if not 0 <= y < len(lines):
+                continue
+            line, column, start, end = lines[y], 0, None, None
+            for index, ch in enumerate(line.plain):
+                if start is None and column + cell_len(ch) > box.x:
+                    start = index
+                if column >= box.x + box.width:
+                    end = index
+                    break
+                column += cell_len(ch)
+            if start is not None:
+                line.stylize(style, start, end if end is not None else len(line.plain))
+    return Text("\n").join(lines)
+
+
+def describe(part: Part) -> str:
+    if part.kind == "node":
+        return f'the box "{part.label}"'
+    if part.kind == "participant":
+        return f'the participant "{part.label}"'
+    if part.kind == "message":
+        return f'the message "{part.label}" {part.detail}'.rstrip()
+    if part.kind == "diagram":
+        return "the whole diagram"
+    return f'the {part.kind} "{part.label}"'
