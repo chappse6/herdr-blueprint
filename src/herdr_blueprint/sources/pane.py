@@ -22,6 +22,9 @@ MAX_FILES = 200
 MAX_DEPTH = 4
 SKIP_DIRS = {"node_modules", "venv", "__pycache__", "dist", "build", "target"}
 
+# Terminal titles that only name the agent app, not what it is doing.
+PRODUCT_TITLES = {"claude", "claude code", "codex", "openai codex"}
+
 # Seconds before giving up on herdr or git, so a stuck command can't freeze the viewer.
 TIMEOUT = 10
 
@@ -74,7 +77,10 @@ def source_of(herdr: str, pane_id: str | None, run=subprocess.run) -> Source | N
     agent = info.get("agent") or None
     tokens = info.get("tokens") if isinstance(info.get("tokens"), dict) else {}
     # A shell's terminal title is just "zsh" or a path; only an agent's says what it does.
-    task = tokens.get("task") or (info.get("terminal_title_stripped") if agent else None)
+    title = info.get("terminal_title_stripped") if agent else None
+    if title and str(title).strip().lower() in PRODUCT_TITLES:
+        title = None
+    task = tokens.get("task") or title
     folder = info.get("foreground_cwd") or info.get("cwd")
     return Source(
         pane_id=pane_id,

@@ -577,8 +577,12 @@ async def test_theme_picker_q_cancels_like_escape():
 
 
 
-def start_app(source=None, asker=None, finder=None) -> BlueprintApp:
-    return BlueprintApp(settings=Config(theme="rose-pine"), source=source, asker=asker, finder=finder)
+def start_app(source=None, asker=None, finder=None, refresher=None) -> BlueprintApp:
+    # Tests never ask the real herdr: the neighbor stays as given unless a test says otherwise.
+    return BlueprintApp(
+        settings=Config(theme="rose-pine"), source=source, asker=asker, finder=finder,
+        refresher=refresher or (lambda pane_id: source),
+    )
 
 
 def start_text(app) -> str:
@@ -711,3 +715,79 @@ async def test_a_failing_file_search_does_not_close_the_viewer(tmp_path):
         await wait_for(pilot, lambda: isinstance(app.screen, FilePicker))
         await wait_for(pilot, lambda: "Cannot list" in str(app.screen.query_one("#files-status", Static).content))
         assert app.is_running
+
+
+# --- the neighbor changes ---------------------------------------------------------------
+
+class Neighbor:
+    """What herdr reports for the pane next to Blueprint, changeable mid-test."""
+
+    def __init__(self, source):
+        self.source = source
+        self.reads = 0
+
+    def __call__(self, pane_id):
+        self.reads += 1
+        return self.source
+
+
+async def test_an_agent_started_later_shows_up(tmp_path):
+    neighbor = Neighbor(Source("w1:p1", cwd=tmp_path))
+    app = start_app(neighbor.source, refresher=neighbor)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        assert not app.check_action("ask", ())
+        neighbor.source = Source("w1:p1", agent="claude", task="Fix login", cwd=tmp_path)
+        app.refresh_source()
+        await wait_for(pilot, lambda: app.check_action("ask", ()))
+        await wait_for(pilot, lambda: "Ask claude to draw this task" in start_text(app))
+        assert "Fix login" in start_text(app)
+
+
+async def test_focusing_blueprint_rereads_the_neighbor(tmp_path):
+    from textual import events
+
+    neighbor = Neighbor(Source("w1:p1", cwd=tmp_path))
+    app = start_app(neighbor.source, refresher=neighbor)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        before = neighbor.reads
+        app.post_message(events.AppFocus())
+        await wait_for(pilot, lambda: neighbor.reads > before)
+
+
+async def test_a_closed_neighbor_hides_ask_but_keeps_the_folder(tmp_path):
+    neighbor = Neighbor(Source("w1:p1", agent="claude", cwd=tmp_path))
+    app = start_app(neighbor.source, refresher=neighbor)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        neighbor.source = None  # herdr no longer knows the pane
+        app.refresh_source()
+        await wait_for(pilot, lambda: not app.check_action("ask", ()))
+        assert app.check_action("open_file", ())
+
+
+async def test_a_new_neighbor_does_not_replace_what_was_sent(tmp_path):
+    neighbor = Neighbor(Source("w1:p1", cwd=tmp_path))
+    app = start_app(neighbor.source, refresher=neighbor)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="markdown", title="Plan", source="# Plan"))
+        neighbor.source = Source("w1:p1", agent="claude", cwd=tmp_path)
+        app.refresh_source()
+        await wait_for(pilot, lambda: app.check_action("ask", ()))
+        await pilot.pause()
+        assert not app.query(StartView) and app.current.title == "Plan"
+
+
+async def test_a_rereads_and_says_when_the_agent_left(tmp_path):
+    asked = []
+    neighbor = Neighbor(Source("w1:p1", agent="claude", cwd=tmp_path))
+    app = start_app(neighbor.source, asker=lambda s: asked.append(s) or (True, "Asked"), refresher=neighbor)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        neighbor.source = Source("w1:p1", cwd=tmp_path)  # claude exited a moment ago
+        await pilot.press("a")
+        await wait_for(pilot, lambda: app.notice == "claude is not in that pane anymore")
+        assert asked == []
+        assert not app.check_action("ask", ())

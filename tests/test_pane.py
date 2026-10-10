@@ -186,3 +186,10 @@ def test_a_hung_herdr_or_git_does_not_hang_or_crash(tmp_path):
     doc = touch(tmp_path / "README.md", 1_000)
     assert pane.find_documents(tmp_path, run=hung) == [doc]
     assert all(seen)  # every call had a timeout
+
+
+def test_an_agent_title_that_is_just_the_product_name_is_not_a_task():
+    # A fresh Claude Code titles its terminal "Claude Code"; that says nothing.
+    for title in ("Claude Code", "claude", "Codex", "OpenAI Codex"):
+        run = completed(pane_json(agent="claude", cwd="/w", terminal_title_stripped=title))
+        assert pane.source_of("herdr", "w1:p1", run=run).task is None, title

@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -56,6 +57,9 @@ NARROW_WIDTH = 60
 
 # Columns moved by one h or l press.
 SIDE_STEP = 4
+
+# Seconds between checks of the pane next to Blueprint (an agent may start or quit).
+NEIGHBOR_SECONDS = 5
 
 
 def ago(at: float, now: float | None = None) -> str:
@@ -138,6 +142,7 @@ class BlueprintApp(App[None]):
         *,
         asker: Callable[[pane.Source], tuple[bool, str]] | None = None,
         finder: Callable[[Path], list[Path]] | None = None,
+        refresher: Callable[[str], pane.Source | None] | None = None,
     ) -> None:
         super().__init__()
         self.settings = settings or config_store.load()
@@ -146,6 +151,7 @@ class BlueprintApp(App[None]):
         herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
         self._asker = asker or (lambda src: pane.ask_to_draw(herdr, src))
         self._finder = finder or pane.find_documents
+        self._refresher = refresher or (lambda pane_id: pane.source_of(herdr, pane_id))
         self.current: Item | None = None
         self.notice: str | None = None
         # A notice is a warning unless it reports something that worked.
@@ -175,6 +181,8 @@ class BlueprintApp(App[None]):
         self._update_status()
         self.run_worker(self._read_inbox(), exclusive=False, exit_on_error=False)
         self.set_interval(30, self._update_status)
+        if self.source:
+            self.set_interval(NEIGHBOR_SECONDS, self.refresh_source)
 
     async def _read_inbox(self) -> None:
         # A broken inbox must not close the viewer: say so in the header instead.
@@ -296,8 +304,47 @@ class BlueprintApp(App[None]):
 
     def _ask(self) -> None:
         assert self.source is not None
-        ok, message = self._asker(self.source)
+        before = self.source
+        # The agent may have quit since the last check: look again first.
+        fresh = self._read_neighbor()
+        if fresh.agent:
+            ok, message = self._asker(fresh)
+        else:
+            ok, message = False, f"{before.agent} is not in that pane anymore"
         self.call_from_thread(self._show_notice, message, ok)
+
+    # The pane next to Blueprint --------------------------------------------
+
+    def on_app_focus(self, event: events.AppFocus) -> None:
+        # Coming back to Blueprint is when its keys are about to be used.
+        self.refresh_source()
+
+    def refresh_source(self) -> None:
+        """Look at the pane next to Blueprint again, in the background."""
+        if self.source:
+            self.run_worker(self._read_neighbor, thread=True, group="neighbor", exclusive=True)
+
+    def _read_neighbor(self) -> pane.Source:
+        """Ask herdr about the neighbor (in a worker thread) and apply the answer."""
+        assert self.source is not None
+        fresh = self._refresher(self.source.pane_id)
+        if fresh is None:
+            # The pane is gone: nobody to ask, but its folder can still be browsed.
+            fresh = replace(self.source, agent=None, task=None)
+        self.call_from_thread(self._apply_neighbor, fresh)
+        return fresh
+
+    async def _apply_neighbor(self, fresh: pane.Source) -> None:
+        if fresh == self.source:
+            return
+        self.source = fresh
+        self.refresh_bindings()
+        async with self._render_lock:
+            # Only the start screen shows the neighbor; never replace a send.
+            if self.current is None and self.query(StartView):
+                body = self.query_one("#body", VerticalScroll)
+                await body.remove_children()
+                await body.mount(StartView(fresh))
 
     def action_open_file(self) -> None:
         """Pick a doc or diagram from the folder of the pane next to Blueprint."""

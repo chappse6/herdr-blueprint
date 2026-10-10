@@ -148,7 +148,10 @@ def main(argv: list[str] | None = None) -> int:
     if viewer_id:
         inbox.mark_viewer(viewer_id)
     try:
-        BlueprintApp(source=pane.source_of(herdr, os.environ.get(SOURCE_ENV))).run()
+        source_pane = os.environ.get(SOURCE_ENV)
+        # If herdr did not answer yet, keep the pane id: the viewer looks again later.
+        source = pane.source_of(herdr, source_pane) or (pane.Source(source_pane) if source_pane else None)
+        BlueprintApp(source=source).run()
     finally:
         if viewer_id:
             inbox.clear_viewer(viewer_id)

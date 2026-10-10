@@ -211,3 +211,22 @@ def test_send_drops_a_utf8_bom(monkeypatch):
     monkeypatch.setattr("sys.stdin", utf8_stdin("﻿graph LR\n  A --> B\n"))
     assert cli.main(["send", "--draw"]) == 0
     assert messages()[0]["source"].startswith("graph LR")
+
+
+def test_the_viewer_keeps_the_pane_id_when_herdr_did_not_answer(monkeypatch):
+    # It can look again later, once herdr answers.
+    seen = {}
+
+    class FakeApp:
+        def __init__(self, source=None):
+            seen["source"] = source
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr("herdr_blueprint.app.BlueprintApp", FakeApp)
+    monkeypatch.setattr("herdr_blueprint.sources.pane.source_of", lambda herdr, pane_id: None)
+    monkeypatch.setenv("BLUEPRINT_SOURCE_PANE", "w1:p1")
+    monkeypatch.delenv("HERDR_PANE_ID", raising=False)
+    assert cli.main([]) == 0
+    assert seen["source"] == pane.Source("w1:p1")
