@@ -260,3 +260,14 @@ def test_start_agent_explains_failures():
     assert pane.start_agent("herdr", source, "claude", run=completed(error_json("pane_busy"), 1)) == (
         False, "Could not start claude: pane busy",
     )
+
+
+def test_an_argument_herdr_cannot_take_never_raises():
+    def nul_is_invalid(cmd, **kwargs):
+        if any("\x00" in part for part in cmd):
+            raise ValueError("embedded null byte")
+        return completed("{}")(cmd)
+
+    assert pane.send_prompt("herdr", pane.Source("w1:p1", agent="claude"), "a\x00b", run=nul_is_invalid) == (
+        False, "Could not reach claude",
+    )

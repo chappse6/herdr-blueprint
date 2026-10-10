@@ -4,10 +4,13 @@ No real editor, herdr or agent: each is a fake passed to the app.
 """
 
 import threading
+import time
 from pathlib import Path
 
+from textual.drivers.headless_driver import HeadlessDriver
 from textual.widgets import OptionList
 
+from herdr_blueprint import edit
 from herdr_blueprint.app import AgentPicker, BlueprintApp
 from herdr_blueprint.config import Config
 from herdr_blueprint.item import MAX_BYTES, Item
@@ -23,19 +26,22 @@ async def wait_for(pilot, condition, seconds: float = 5.0) -> None:
 
 
 class FakeEditor:
-    """Stands in for vim: optionally rewrites the copy, then exits with `code`."""
+    """Stands in for vim. `change` rewrites the copy (:wq after editing); `save`
+    writes it back unchanged (:wq without editing); neither is :q!."""
 
-    def __init__(self, change=None, code=0, during=None):
-        self.change, self.code, self.during = change, code, during
+    def __init__(self, change=None, code=0, during=None, save=False):
+        self.change, self.code, self.during, self.save = change, code, during, save
         self.seen = []  # (command, copy path, text it opened with)
 
     def __call__(self, command):
         copy = Path(command[-1])
-        self.seen.append((command, copy, copy.read_text(encoding="utf-8")))
+        text = copy.read_text(encoding="utf-8")
+        self.seen.append((command, copy, text))
         if self.during:
             self.during()
-        if self.change:
-            copy.write_text(self.change(copy.read_text(encoding="utf-8")), encoding="utf-8")
+        if self.change or self.save:
+            time.sleep(0.01)  # a later mtime, as a real save has
+            copy.write_text(self.change(text) if self.change else text, encoding="utf-8")
         return self.code
 
 
@@ -138,7 +144,7 @@ async def test_saving_a_change_sends_the_diff_and_leaves_the_file_alone(tmp_path
         await wait_for(pilot, lambda: app.notice == "Sent your edit to claude")
         (source, text), = prompter.sent
         assert source.pane_id == "w1:p1"
-        assert text.startswith("I edited docs/flow.md in Blueprint.")
+        assert text.startswith("I edited `docs/flow.md` in Blueprint.")
         assert "```diff" in text and "-old line" in text and "+new line" in text
         assert path.read_text(encoding="utf-8") == "# Flow\n\nold line\n"  # Blueprint never writes it
         command, copy, _ = editor.seen[0]
@@ -184,7 +190,7 @@ async def test_a_failed_send_keeps_the_edit_for_the_next_e(tmp_path):
         await pilot.press("e")
         await wait_for(pilot, lambda: app.notice and "press e" in app.notice)
         assert "waiting for your answer" in app.notice
-        editor.change = None  # this time just save and quit
+        editor.change, editor.save = None, True  # this time save and quit without editing
         await pilot.press("e")
         await wait_for(pilot, lambda: app.notice == "Sent your edit to claude")
         assert "new line" in editor.seen[1][2]  # reopened the edit, not the file
@@ -264,7 +270,9 @@ async def test_declining_the_start_keeps_the_edit(tmp_path):
         await pilot.press("escape")
         await wait_for(pilot, lambda: app.notice and "press e" in app.notice)
         assert started == [] and prompter.sent == []
-        assert app.check_action("edit", ())
+        await pilot.press("e")
+        await wait_for(pilot, lambda: len(app._editor.seen) == 2)
+        assert "new line" in app._editor.seen[1][2]  # the kept edit, not the file
 
 
 async def test_a_busy_neighbor_is_not_offered_an_agent(tmp_path):
@@ -307,7 +315,7 @@ async def test_a_long_diff_goes_to_a_file_that_is_removed_on_close(tmp_path):
         await wait_for(pilot, lambda: prompter.sent)
         text = prompter.sent[0][1]
         assert "```diff" not in text
-        attachment = Path(text.split("The diff is in ", 1)[1].split(".diff", 1)[0] + ".diff")
+        attachment = Path(text.split("The diff is in `", 1)[1].split("`", 1)[0])
         assert attachment.exists() and "+new line" in attachment.read_text(encoding="utf-8")
     assert not attachment.exists()
 
@@ -323,3 +331,219 @@ async def test_a_hostile_title_does_not_crash(tmp_path):
         assert app.is_running
         name = editor.seen[0][1].name
         assert len(name) <= 64 and name.endswith(".md")
+
+
+# --- review fixes ----------------------------------------------------------------------------
+
+def record_suspend(monkeypatch):
+    calls = []
+    monkeypatch.setattr(HeadlessDriver, "can_suspend", property(lambda self: True), raising=False)
+    monkeypatch.setattr(HeadlessDriver, "suspend_application_mode", lambda self: calls.append("suspend"), raising=False)
+    monkeypatch.setattr(HeadlessDriver, "resume_application_mode", lambda self: calls.append("resume"), raising=False)
+    return calls
+
+
+async def test_an_editor_that_cannot_start_never_leaves_blueprint_suspended(tmp_path, monkeypatch):
+    calls = record_suspend(monkeypatch)
+    app = make_app(tmp_path, editor=None)  # the real runner
+    app._find_editor = lambda: [str(tmp_path / "no-such-editor")]
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(file_item(doc(tmp_path)))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice and "Could not run the editor" in app.notice)
+        assert calls == ["suspend", "resume"]
+        assert app.is_running
+
+
+async def test_the_real_runner_returns_the_editor_exit_code(tmp_path, monkeypatch):
+    record_suspend(monkeypatch)
+    import sys
+    script = tmp_path / "ed.py"
+    script.write_text("import sys, pathlib; p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace('old', 'new'))")
+    prompter = FakePrompter()
+    app = make_app(tmp_path, editor=None, prompter=prompter)
+    app._find_editor = lambda: [sys.executable, str(script)]
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(file_item(doc(tmp_path)))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: prompter.sent)
+        assert "+new line" in prompter.sent[0][1]
+
+
+async def test_a_bad_editor_setting_is_a_warning_not_a_crash(tmp_path):
+    def bad():
+        raise edit.EditorError("Cannot read $EDITOR: No closing quotation")
+
+    app = make_app(tmp_path, editor=FakeEditor())
+    app._find_editor = bad
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(file_item(doc(tmp_path)))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice == "Cannot read $EDITOR: No closing quotation")
+        assert app.is_running
+
+
+async def test_quitting_a_reopened_edit_without_saving_keeps_it_unsent(tmp_path):
+    editor = FakeEditor(change=change_line)
+    prompter = FakePrompter((False, "claude is waiting for your answer"))
+    app = make_app(tmp_path, editor=editor, prompter=prompter)
+    async with app.run_test(size=(140, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(file_item(doc(tmp_path)))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice and "press e" in app.notice)
+        editor.change = None  # :q!
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice and app.notice.startswith("Not saved"))
+        assert len(prompter.sent) == 1
+        editor.save = True  # it is still there to send
+        await pilot.press("e")
+        await wait_for(pilot, lambda: len(prompter.sent) == 2)
+        assert "new line" in editor.seen[2][2]
+
+
+async def test_saving_an_empty_file_throws_the_edit_away(tmp_path):
+    editor = FakeEditor(change=change_line)
+    prompter = FakePrompter((False, "claude is waiting for your answer"))
+    app = make_app(tmp_path, editor=editor, prompter=prompter)
+    async with app.run_test(size=(140, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(file_item(doc(tmp_path)))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice and "press e" in app.notice)
+        editor.change = lambda text: ""
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice == "Edit thrown away")
+        editor.change = None
+        await pilot.press("e")
+        await wait_for(pilot, lambda: len(editor.seen) == 3)
+        assert "old line" in editor.seen[2][2]  # back to the file
+        assert len(prompter.sent) == 1
+
+
+async def test_saving_without_editing_is_no_change_even_with_a_new_final_newline(tmp_path):
+    prompter = FakePrompter()
+    app = make_app(tmp_path, editor=FakeEditor(change=lambda t: t + "\n"), prompter=prompter)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="mermaid", title="Flow", source="graph LR\n  A --> B"))  # no final newline
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice == "No changes")
+        path = doc(tmp_path, "# Flow\n\nold line")  # a file without one either
+        await app.open_item(file_item(path))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: len(app._editor.seen) == 2 and app.notice == "No changes")
+        assert prompter.sent == []
+
+
+async def test_a_file_edit_survives_another_send_and_reopens_on_its_document(tmp_path):
+    editor = FakeEditor(change=change_line)
+    prompter = FakePrompter((False, "claude is waiting for your answer"), (True, "Sent to claude"))
+    path = doc(tmp_path)
+    app = make_app(tmp_path, editor=editor, prompter=prompter)
+    async with app.run_test(size=(140, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(file_item(path))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice and "press e" in app.notice)
+        await app.open_item(Item(kind="markdown", title="Other", source="# Other\n"))
+        await app.open_item(file_item(path))
+        editor.change, editor.save = None, True
+        await pilot.press("e")
+        await wait_for(pilot, lambda: len(prompter.sent) == 2)
+        assert "new line" in editor.seen[1][2]
+
+
+async def test_a_failed_send_after_the_screen_changed_says_where_the_edit_is(tmp_path):
+    release = threading.Event()
+
+    def slow_fail(source, text):
+        release.wait(5)
+        return False, "claude is waiting for your answer"
+
+    editor = FakeEditor(change=change_line)
+    path = doc(tmp_path)
+    app = make_app(tmp_path, editor=editor, prompter=slow_fail)
+    async with app.run_test(size=(160, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(file_item(path))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice == "Sending your edit…")
+        await app.open_item(Item(kind="markdown", title="Other", source="# Other\n"))
+        release.set()
+        await wait_for(pilot, lambda: app.notice and "waiting for your answer" in app.notice)
+        assert "open docs/flow.md again" in app.notice or "open flow.md again" in app.notice
+        editor.change = None
+        await pilot.press("e")  # edits Other, not the kept edit
+        await wait_for(pilot, lambda: len(editor.seen) == 2)
+        assert editor.seen[1][2] == "# Other\n"
+
+
+async def test_an_unsent_snippet_edit_replaced_on_screen_is_dropped_with_a_notice(tmp_path):
+    prompter = FakePrompter((False, "claude is waiting for your answer"))
+    app = make_app(tmp_path, editor=FakeEditor(change=lambda t: t + "more\n"), prompter=prompter)
+    async with app.run_test(size=(160, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="markdown", title="Plan", source="# Plan\n"))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: app.notice and "press e" in app.notice)
+        await app.open_item(Item(kind="markdown", title="Other", source="# Other\n"))
+        assert app.notice and "Plan" in app.notice and "dropped" in app.notice
+
+
+async def test_long_bodies_never_share_a_file(tmp_path):
+    path = doc(tmp_path, "# Flow\n\n" + "old line\n" * 900)
+    prompter = FakePrompter()
+    editor = FakeEditor(change=change_line)
+    app = make_app(tmp_path, editor=editor, prompter=prompter)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(file_item(path))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: len(prompter.sent) == 1)
+        editor.change = lambda t: t.replace("old line", "other line")
+        await pilot.press("e")
+        await wait_for(pilot, lambda: len(prompter.sent) == 2)
+        first, second = (Path(text.split("The diff is in `", 1)[1].split("`", 1)[0]) for _, text in prompter.sent)
+        assert first != second and "+new line" in first.read_text(encoding="utf-8")
+
+
+async def test_control_characters_never_reach_the_agent(tmp_path):
+    prompter = FakePrompter()
+    app = make_app(tmp_path, editor=FakeEditor(change=lambda t: t + "bad\x00\x1b[31m\n"), prompter=prompter)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="markdown", title="Plan", source="# Plan\n"))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: prompter.sent)
+        text = prompter.sent[0][1]
+        assert "\x00" not in text and "\x1b" not in text and "bad[31m" in text
+
+
+async def test_quitting_while_an_agent_starts_sends_nothing(tmp_path):
+    release = threading.Event()
+    shell = Source("w1:p1", cwd=tmp_path)
+    prompter = FakePrompter()
+
+    def slow_start(source, kind):
+        release.wait(5)
+        return True, f"Started {kind}"
+
+    app = make_app(
+        tmp_path, editor=FakeEditor(change=change_line), prompter=prompter, source=shell,
+        idle_shell=lambda pane_id: True, starter=slow_start,
+    )
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(file_item(doc(tmp_path)))
+        await pilot.press("e")
+        await wait_for(pilot, lambda: isinstance(app.screen, AgentPicker))
+        await pilot.press("enter")
+        await wait_for(pilot, lambda: app.notice == "Starting claude…")
+        app.exit()
+    release.set()
+    time.sleep(0.2)
+    assert prompter.sent == []

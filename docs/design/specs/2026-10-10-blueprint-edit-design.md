@@ -30,8 +30,12 @@ undo states), so the state is gone.
    and the two never collide. The agent's own changes can be rolled back with
    the agent (Claude Code's `/rewind`) or git.
 3. Blueprint never starts an agent without asking.
-4. An edit that could not be sent is not lost: it stays in memory, and the next
-   `e` opens it again.
+4. An edit that could not be sent is not lost: it stays in memory with its
+   document, and the next `e` on that document opens it again. Quitting it
+   without saving keeps it; saving it empty throws it away (as an empty
+   `git commit` message does). Text an agent sent cannot be shown again once
+   something replaces it, so an unsent edit of such text is dropped then, with
+   a notice naming it.
 5. Nothing new outlives the session. The copy is deleted as soon as the editor
    closes. A long diff given to the agent as a file is deleted when Blueprint
    closes.
@@ -55,13 +59,16 @@ flowchart TD
 ## The editor
 
 - Command: `$VISUAL`, then `$EDITOR`, then the first of `vim`, `vi`, `nano` on
-  PATH; on Windows `notepad` last. `code` and `subl` get `--wait`. Quotes around
+  PATH; on Windows `notepad` last. A setting that can't be parsed, or that names
+  a program which is not there, is a warning before anything starts: starting
+  it with the terminal already handed over would leave Blueprint hanging. `code` and `subl` get `--wait`. Quotes around
   a program path are removed and the program is resolved on PATH, so
   `"C:\Program Files\Notepad++\notepad++.exe" -multiInst` and `EDITOR=code` work
   on Windows.
 - Run inside Blueprint's pane with Textual's `App.suspend()` (Unix and Windows).
-  Ctrl+C is ignored by Blueprint while the editor runs, as git does, so it
-  reaches the editor instead of killing Blueprint.
+  While the editor runs, Blueprint ignores Ctrl+C, Ctrl+\\ and Ctrl+Z (the
+  editor keeps its own handling), as git does. An editor that fails to start
+  still gives the terminal back to Blueprint.
 - The copy lives in a fresh temporary folder and is named after the original
   (`login-flow.md`), cleaned to letters, digits, `.`, `_` and `-`, at most 60
   characters, ending in `.mmd` for diagrams and `.md` otherwise. A title from an
@@ -81,7 +88,7 @@ flowchart TD
 
 1. Look at the pane next to Blueprint again, as `a` does.
 2. **Agent there**: send with `herdr agent prompt`. The header says
-   "Sending to claude…" and then "Sent your edit to claude". `e` is unavailable
+   "Sending your edit…" and then "Sent your edit to claude". `e` is unavailable
    until the send finishes, so two edits never overlap.
 3. **A shell at its prompt** (its only foreground process is the shell itself):
    ask "Start an agent next to Blueprint and send your edit?". With one agent
@@ -89,7 +96,8 @@ flowchart TD
    `herdr agent start bp-<kind>-<pane> --kind <kind> --pane <id>` (the pane id
    cleaned to a valid name), then sends.
 4. **No neighbor, or it runs something else**, or the person says no, or the
-   send fails: the header says why and "press e to edit it again". The edit is
+   send fails: the header says why and "press e to edit it again" (or "open
+   <file> again and press e" if the screen changed meanwhile). The edit is
    kept (rule 4).
 
 ### The prompt
@@ -114,8 +122,10 @@ instead; update what it describes, then send the new version to Blueprint",
 followed by the new source in a `mermaid` or `markdown` fence.
 
 The diff or source sits in a fence, so the agent's screen does not turn `+`
-lines into list bullets. Text longer than 6,000 characters goes into a file in
-Blueprint's own temporary folder instead, and the prompt names its path.
+lines into list bullets. Paths are in backticks. Control characters are removed
+from the prompt. A change of line endings or of the final newline alone (vim
+and nano add one on save) is no change. Text longer than 6,000 characters goes into its own file in
+Blueprint's temporary folder instead, and the prompt names its path.
 
 ## Sends that arrive while the editor is open
 
@@ -133,8 +143,9 @@ replaces the screen.
 
 ## Parts
 
-- `edit.py`: `editor_command()`, `copy_name()`, `unified_diff()`,
-  `prompt_for()`, `kinds_on_path()`. No Textual.
+- `edit.py`: `editor_command()`, `copy_name()`, `same_text()`, `unified_diff()`,
+  `file_prompt()`, `text_prompt()`, `prompt_safe()`, `kinds_on_path()`,
+  `agent_name()`. No Textual.
 - `sources/pane.py`: `send_prompt()` shared with `a`, `shell_is_idle()`,
   `start_agent()`.
 - `app.py`: `action_edit`, the send worker, the start dialog, the kept edit.

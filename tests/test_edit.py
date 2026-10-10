@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from herdr_blueprint import edit
 
 
@@ -22,6 +24,27 @@ def test_editor_prefers_visual_then_editor_then_path():
 
 def test_no_editor_at_all():
     assert edit.editor_command({}, which=which_only(), system="posix") is None
+
+
+def test_a_configured_editor_that_does_not_exist_is_an_error():
+    # Passing it on would fail inside the suspended terminal.
+    with pytest.raises(edit.EditorError, match="Editor not found: nvimm"):
+        edit.editor_command({"EDITOR": "nvimm"}, which=which_only("vim"), system="posix")
+
+
+def test_unbalanced_quotes_in_the_editor_setting_are_an_error():
+    with pytest.raises(edit.EditorError, match=r"Cannot read \$EDITOR"):
+        edit.editor_command({"EDITOR": '"vim'}, which=which_only("vim"), system="posix")
+
+
+def test_an_editor_path_with_home_or_a_plain_file_works(tmp_path, monkeypatch):
+    program = tmp_path / "bin" / "myvim"
+    program.parent.mkdir()
+    program.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    nowhere = which_only()
+    assert edit.editor_command({"EDITOR": "~/bin/myvim -n"}, which=nowhere, system="posix") == [str(program), "-n"]
+    assert edit.editor_command({"EDITOR": str(program)}, which=nowhere, system="posix") == [str(program)]
 
 
 def test_notepad_is_the_windows_last_resort():
@@ -53,6 +76,12 @@ def test_copy_keeps_a_clean_name_and_the_right_suffix():
     assert edit.copy_name("notes.markdown", diagram=False) == "notes.md"
 
 
+def test_windows_device_names_are_not_used_as_is():
+    for title in ("CON", "nul", "COM1", "lpt9.md"):
+        name = edit.copy_name(title, diagram=False)
+        assert name.split(".")[0].upper() not in {"CON", "NUL", "COM1", "LPT9"}, name
+
+
 def test_hostile_titles_still_make_a_valid_name():
     for title in ("a" * 400, "bad\x00name", 'what: is* this? <x> |y| "z"', "../../etc/passwd", "", "한글 제목"):
         name = edit.copy_name(title, diagram=False)
@@ -70,6 +99,20 @@ def test_diff_is_empty_without_a_change():
     assert "-b" in diff and "+c" in diff and "docs/x.md" in diff
 
 
+def test_an_editor_adding_a_final_newline_or_crlf_is_no_change():
+    # vim and nano add the final newline on save; sent snippets have none.
+    assert edit.same_text("graph LR\n  A --> B", "graph LR\n  A --> B\n")
+    assert edit.same_text("a\r\nb\r\n", "a\nb\n")
+    assert not edit.same_text("a\nb", "a\nc")
+    assert edit.unified_diff("a\nb", "a\nb\n", "x.md") == ""
+
+
+def test_diff_lines_are_the_file_lines():
+    # str.splitlines would also split on form feeds and U+2028.
+    diff = edit.unified_diff("one\x0ctwo\nthree\n", "one\x0ctwo\nTHREE\n", "x.md")
+    assert " one\x0ctwo" in diff
+
+
 def test_display_path_is_relative_inside_the_agent_folder(tmp_path):
     inside = tmp_path / "docs" / "flow.md"
     assert edit.display_path(inside, tmp_path) == "docs/flow.md"
@@ -79,7 +122,7 @@ def test_display_path_is_relative_inside_the_agent_folder(tmp_path):
 
 def test_file_prompt_fences_the_diff_and_asks_to_apply_and_show():
     prompt = edit.file_prompt("docs/flow.md", "--- a\n+++ b\n+new line\n", diverged=False)
-    assert prompt.startswith("I edited docs/flow.md in Blueprint.")
+    assert prompt.startswith("I edited `docs/flow.md` in Blueprint.")
     assert "anything that depends on it" in prompt and "show the result in Blueprint" in prompt
     assert "```diff\n--- a\n+++ b\n+new line\n```" in prompt
     assert "changed" not in prompt.split("```")[0].lower().replace("i edited", "")
@@ -100,8 +143,8 @@ def test_text_prompt_sends_the_new_version_not_a_diff():
 
 
 def test_long_bodies_are_named_by_path():
-    prompt = edit.file_prompt("docs/flow.md", "x" * 10, diverged=False, attachment=Path("/tmp/bp/flow.diff"))
-    assert "/tmp/bp/flow.diff" in prompt and "```diff" not in prompt
+    prompt = edit.file_prompt("docs/flow.md", "x" * 10, diverged=False, attachment=Path("/tmp/b p/flow.diff"))
+    assert "`/tmp/b p/flow.diff`" in prompt and "```diff" not in prompt
     assert edit.needs_attachment("x" * (edit.INLINE_LIMIT + 1))
     assert not edit.needs_attachment("x" * edit.INLINE_LIMIT)
 
@@ -110,6 +153,11 @@ def test_content_with_backticks_cannot_break_the_fence():
     prompt = edit.text_prompt("Plan", "```\nx\n```\n", diagram=False)
     # The fence is longer than any backtick run inside, so the content stays inside it.
     assert "````markdown\n```\nx\n```\n````" in prompt
+
+
+def test_control_characters_are_removed_from_prompts():
+    # argv cannot hold NUL, and escapes have no business in a pasted prompt.
+    assert edit.prompt_safe("a\x00b\x1b[31mc\td\ne") == "ab[31mc\td\ne"
 
 
 # --- agents ---------------------------------------------------------------------------------

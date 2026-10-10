@@ -42,7 +42,7 @@ def _herdr(herdr: str, args: list[str], run, timeout: float = TIMEOUT) -> tuple[
     try:
         # herdr prints UTF-8; Windows would otherwise decode with the ANSI code page.
         done = run([herdr, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):  # ValueError: NUL in an argument
         return None, None
     try:
         data = json.loads(done.stdout)

@@ -55,7 +55,8 @@ Empty `$root` means the plugin is not installed: tell the user to run
 ## When the user edited something in Blueprint
 
 The prompt starts with "I edited ... in Blueprint" and holds a diff (for a
-file) or the new version (for something you sent). Apply it: change the file
+file) or the new version (for something you sent). A long one is in a file the
+prompt names; read it right away, it is deleted when Blueprint closes. Apply it: change the file
 and anything that depends on it. If the prompt says the file changed on disk,
 read the file first instead of applying the diff blindly. Then show the result
 in Blueprint again: `show` the file, or `send` the new version, with `--draw`

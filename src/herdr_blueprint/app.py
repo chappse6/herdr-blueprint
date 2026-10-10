@@ -91,22 +91,33 @@ class KeptEdit:
 
 def same_item(a: Item | None, b: Item | None) -> bool:
     """The same document, even after a reload made a new Item for it."""
-    if a is None or b is None or a.kind != b.kind or a.path != b.path:
-        return False
-    return a.path is not None or (a.title, a.source) == (b.title, b.source)
+    return a is not None and b is not None and doc_key(a) == doc_key(b)
+
+
+def doc_key(item: Item) -> tuple:
+    """What an unsent edit belongs to: a file by its path, sent text by its content."""
+    if item.path is not None:
+        return ("file", item.path.resolve())
+    return ("text", item.kind, item.title, item.source)
+
+
+# Signals the terminal sends to the whole foreground group: while the editor runs
+# they are the editor's (Ctrl+C, Ctrl+\\, Ctrl+Z), not Blueprint's. git does the same.
+_EDITOR_SIGNALS = [getattr(signal, name) for name in ("SIGINT", "SIGQUIT", "SIGTSTP") if hasattr(signal, name)]
 
 
 @contextmanager
-def interrupts_ignored() -> Iterator[None]:
-    """Let Ctrl+C reach the editor instead of killing Blueprint, as git does."""
+def editor_signals_ignored() -> Iterator[None]:
+    """Ignore terminal signals in Blueprint (only; the editor keeps the defaults)."""
     if threading.current_thread() is not threading.main_thread():
         yield
         return
-    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    previous = [(sig, signal.signal(sig, signal.SIG_IGN)) for sig in _EDITOR_SIGNALS]
     try:
         yield
     finally:
-        signal.signal(signal.SIGINT, previous)
+        for sig, handler in previous:
+            signal.signal(sig, handler if handler is not None else signal.SIG_DFL)
 
 
 class AgentPicker(ModalScreen[str | None]):
@@ -243,10 +254,13 @@ class BlueprintApp(App[None]):
         self._starter = starter or (lambda src, kind: pane.start_agent(herdr, src, kind))
         self._idle_shell = idle_shell or (lambda pane_id: pane.shell_is_idle(herdr, pane_id))
         self._kinds = kinds or edit.kinds_on_path
-        self._kept: KeptEdit | None = None
+        # Unsent edits, one per document; the next `e` on that document reopens it.
+        self._kept: dict[tuple, KeptEdit] = {}
         self._sending = False
+        self._closing = False
         # Long prompt bodies for the agent; removed when Blueprint closes.
         self._attachments: Path | None = None
+        self._shown_key: tuple | None = None
         self.current: Item | None = None
         self.notice: str | None = None
         # A notice is a warning unless it reports something that worked.
@@ -331,9 +345,14 @@ class BlueprintApp(App[None]):
         await self._render_text(text, diagram=item.is_diagram, draw=draw, plain=plain)
         self.current = item
         self.title_text = clean(item.title)
-        if self._kept and not self._sending and not same_item(self._kept.item, item):
-            self._kept = None
-            self.notice, self.notice_ok = "An edit that was not sent was dropped", False
+        previous_key = self._shown_key
+        self._shown_key = doc_key(item)
+        dropped = self._kept.get(previous_key) if previous_key != self._shown_key else None
+        if dropped and previous_key[0] == "text" and not self._sending:
+            # Sent text can't be shown again, so its edit can't be reopened.
+            del self._kept[previous_key]
+            self.notice = f"Your unsent edit of '{clean(dropped.item.title)}' was dropped"
+            self.notice_ok = False
         self.refresh_bindings()
         self._update_status()
 
@@ -450,11 +469,14 @@ class BlueprintApp(App[None]):
 
     # Editing ------------------------------------------------------------------
 
+    def _kept_for(self, item: Item | None) -> KeptEdit | None:
+        return self._kept.get(doc_key(item)) if item is not None else None
+
     def _editable(self) -> bool:
         item = self.current
         if item is None or self._sending:
             return False
-        if item.kind != "file" or (self._kept and same_item(self._kept.item, item)):
+        if item.kind != "file" or self._kept_for(item):
             return True
         try:
             return item.path is not None and item.path.stat().st_size <= MAX_BYTES
@@ -466,7 +488,7 @@ class BlueprintApp(App[None]):
         item = self.current
         if item is None or not self._editable():
             return
-        kept = self._kept if self._kept and same_item(self._kept.item, item) else None
+        kept = self._kept_for(item)
         if kept:
             base, base_bytes, start = kept.base, kept.base_bytes, kept.edited
         else:
@@ -476,19 +498,33 @@ class BlueprintApp(App[None]):
                 self._show_notice(f"Cannot read {clean(item.title)}")
                 return
             start = base
-        command = self._find_editor()
+        try:
+            command = self._find_editor()
+        except edit.EditorError as exc:
+            self._show_notice(clean(str(exc)))
+            return
         if not command:
             self._show_notice("No editor found: set $EDITOR")
             return
-        edited = self._edit_copy(item, start, command)
-        if edited is None:
+        outcome = self._edit_copy(item, start, command)
+        if outcome is None:
             return
-        if edited == base:
-            self._kept = None
+        saved, edited = outcome
+        key = doc_key(item)
+        if not saved:
+            # :q! keeps whatever was waiting; nothing is sent.
+            self._show_notice("Not saved. Your edit is kept; press e to edit it again" if kept else "No changes")
+            return
+        if kept and not edited.strip():
+            del self._kept[key]
+            self._show_notice("Edit thrown away")
+            return
+        if edit.same_text(edited, base):
+            self._kept.pop(key, None)
             self._show_notice("No changes")
             return
-        self._kept = KeptEdit(item, base, base_bytes, edited)
-        self._send_kept(self._kept)
+        self._kept[key] = KeptEdit(item, base, base_bytes, edited)
+        self._send_kept(self._kept[key])
 
     def _edit_base(self, item: Item) -> tuple[str, bytes | None]:
         if item.kind != "file":
@@ -499,21 +535,24 @@ class BlueprintApp(App[None]):
             raise OSError("too large to edit")
         return data.decode("utf-8-sig", errors="replace"), data
 
-    def _edit_copy(self, item: Item, text: str, command: list[str]) -> str | None:
-        """Run the editor on a copy; the saved text, or None (cancelled, or failed)."""
+    def _edit_copy(self, item: Item, text: str, command: list[str]) -> tuple[bool, str] | None:
+        """Run the editor on a copy: (saved, text), or None when it was cancelled or failed."""
         name = edit.copy_name(item.path.name if item.path else item.title, diagram=item.is_diagram)
         try:
             folder = Path(tempfile.mkdtemp(prefix="blueprint-edit-"))
         except OSError as exc:
-            self._show_notice(f"Cannot make a copy to edit: {exc}")
+            self._show_notice(f"Cannot make a copy to edit: {clean(str(exc))}")
             return None
         try:
             copy = folder / name
             copy.write_text(text, encoding="utf-8", newline="")
+            before = copy.stat()
             if self._editor([*command, str(copy)]) != 0:
                 self._show_notice("Edit cancelled")
                 return None
-            return copy.read_text(encoding="utf-8", errors="replace", newline="")
+            after = copy.stat()
+            saved = (after.st_mtime_ns, after.st_size) != (before.st_mtime_ns, before.st_size)
+            return saved, copy.read_text(encoding="utf-8", errors="replace", newline="")
         except SuspendNotSupported:
             self._show_notice("This terminal cannot run an editor from Blueprint")
         except (OSError, ValueError) as exc:
@@ -523,8 +562,21 @@ class BlueprintApp(App[None]):
         return None
 
     def _run_editor(self, command: list[str]) -> int:
-        with self.suspend(), interrupts_ignored():
-            return subprocess.run(command).returncode
+        """Hand the terminal to the editor. Nothing may escape the suspend block:
+        Textual would skip taking the terminal back, and Blueprint would hang."""
+        error: OSError | None = None
+        code = 1
+        with self.suspend():
+            try:
+                process = subprocess.Popen(command)
+            except OSError as exc:
+                error = exc
+            else:
+                with editor_signals_ignored():
+                    code = process.wait()
+        if error is not None:
+            raise error
+        return code
 
     def _send_kept(self, kept: KeptEdit) -> None:
         self._sending = True
@@ -539,6 +591,8 @@ class BlueprintApp(App[None]):
                 result = (False, "No agent next to Blueprint")
             else:
                 fresh = self._read_neighbor()
+                if self._closing:
+                    return
                 if fresh.agent:
                     result = self._prompter(fresh, self._prompt_for(kept, fresh))
                 elif self._idle_shell(fresh.pane_id) and (kinds := self._kinds()):
@@ -548,7 +602,7 @@ class BlueprintApp(App[None]):
                     result = (False, "No agent next to Blueprint")
         except Exception as exc:
             result = (False, f"Could not send: {exc}")
-        self.call_from_thread(self._sent, kept, *result)
+        self._after_send(kept, *result)
 
     def _offer_agent(self, kept: KeptEdit, fresh: pane.Source, kinds: list[str]) -> None:
         def chosen(kind: str | None) -> None:
@@ -565,23 +619,41 @@ class BlueprintApp(App[None]):
     def _start_and_send(self, kept: KeptEdit, fresh: pane.Source, kind: str) -> None:
         try:
             started, message = self._starter(fresh, kind)
-            if started:
+            if started and not self._closing:
                 ready = self._read_neighbor()
                 target = ready if ready.agent else replace(fresh, agent=kind)
+                if self._closing:
+                    return
                 started, message = self._prompter(target, self._prompt_for(kept, target))
         except Exception as exc:
             started, message = False, f"Could not start {kind}: {exc}"
-        self.call_from_thread(self._sent, kept, started, message)
+        self._after_send(kept, started, message)
+
+    def _after_send(self, kept: KeptEdit, ok: bool, message: str) -> None:
+        if self._closing:
+            return
+        try:
+            self.call_from_thread(self._sent, kept, ok, message)
+        except RuntimeError:
+            pass  # Blueprint closed meanwhile
 
     def _sent(self, kept: KeptEdit, ok: bool, message: str) -> None:
         self._sending = False
+        key = doc_key(kept.item)
+        here = same_item(kept.item, self.current)
         if ok:
-            if self._kept is kept:
-                self._kept = None
+            if self._kept.get(key) is kept:
+                del self._kept[key]
             agent = message.removeprefix("Sent to ") if message.startswith("Sent to ") else "the agent"
             self._show_notice(f"Sent your edit to {agent}", ok=True)
-        else:
+        elif here:
             self._show_notice(f"{clean(message)}. Your edit was not sent; press e to edit it again")
+        elif key[0] == "file":
+            where = clean(kept.item.title)
+            self._show_notice(f"{clean(message)}. Your edit was not sent; open {where} again and press e")
+        else:
+            self._kept.pop(key, None)
+            self._show_notice(f"{clean(message)}. Your edit of '{clean(kept.item.title)}' was not sent and was dropped")
         self.refresh_bindings()
 
     def _prompt_for(self, kept: KeptEdit, target: pane.Source) -> str:
@@ -593,26 +665,32 @@ class BlueprintApp(App[None]):
                 diverged = item.path.read_bytes() != kept.base_bytes
             except OSError:
                 diverged = True
-            name = edit.copy_name(item.path.name, diagram=False).removesuffix(".md") + ".diff"
-            attachment = self._attach(diff, name) if edit.needs_attachment(diff) else None
-            return edit.file_prompt(label, diff, diverged=diverged, attachment=attachment)
-        source = kept.edited
-        name = edit.copy_name(item.title, diagram=item.is_diagram)
-        attachment = self._attach(source, name) if edit.needs_attachment(source) else None
-        return edit.text_prompt(clean(item.title), source, diagram=item.is_diagram, attachment=attachment)
+            stem = edit.copy_name(item.path.name, diagram=False).removesuffix(".md")
+            attachment = self._attach(diff, stem, ".diff") if edit.needs_attachment(diff) else None
+            text = edit.file_prompt(label, diff, diverged=diverged, attachment=attachment)
+        else:
+            source = kept.edited
+            stem, suffix = edit.copy_name(item.title, diagram=item.is_diagram).rsplit(".", 1)
+            attachment = self._attach(source, stem, f".{suffix}") if edit.needs_attachment(source) else None
+            text = edit.text_prompt(clean(item.title), source, diagram=item.is_diagram, attachment=attachment)
+        return edit.prompt_safe(text)
 
-    def _attach(self, text: str, name: str) -> Path | None:
-        """Put a long prompt body in a file the agent can read; None to inline it instead."""
+    def _attach(self, text: str, stem: str, suffix: str) -> Path | None:
+        """Put a long prompt body in its own file for the agent; None to inline it instead."""
+        if self._closing:
+            return None
         try:
             if self._attachments is None:
                 self._attachments = Path(tempfile.mkdtemp(prefix="blueprint-"))
-            path = self._attachments / name
-            path.write_text(text, encoding="utf-8")
-            return path
+            handle, name = tempfile.mkstemp(dir=self._attachments, prefix=f"{stem}-", suffix=suffix)
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(text)
+            return Path(name)
         except OSError:
             return None
 
     def on_unmount(self) -> None:
+        self._closing = True
         if self._attachments is not None:
             shutil.rmtree(self._attachments, ignore_errors=True)
 

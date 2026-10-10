@@ -30,6 +30,16 @@ _WAITING_FLAGS = {"code": "--wait", "codium": "--wait", "subl": "--wait"}
 
 _DOC_SUFFIXES = (".md", ".markdown", ".mmd", ".mermaid")
 
+# Names Windows reserves for devices, whatever the extension.
+_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
+
+# C0 controls except tab and newline, and DEL: never part of a prompt.
+_PROMPT_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+class EditorError(Exception):
+    """The editor setting can't be used; the message says why."""
+
 
 def _program(path: str) -> str:
     name = Path(path.replace("\\", "/")).name.lower()
@@ -42,15 +52,23 @@ def editor_command(
     which: Callable[[str], str | None] = shutil.which,
     system: str | None = None,
 ) -> list[str] | None:
-    """$VISUAL, else $EDITOR, else vim, vi, nano; notepad last on Windows."""
+    """$VISUAL, else $EDITOR, else vim, vi, nano; notepad last on Windows.
+
+    None when nothing is set and nothing is installed. EditorError when the
+    setting can't be parsed or names a program that isn't there: starting it
+    would fail with the terminal handed over to it.
+    """
     environ = os.environ if environ is None else environ
     system = os.name if system is None else system
     command: list[str] | None = None
     for key in ("VISUAL", "EDITOR"):
         raw = environ.get(key, "").strip()
         if raw:
-            # Windows keeps backslashes; quotes around a path are not part of it.
-            parts = shlex.split(raw, posix=system != "nt")
+            try:
+                # Windows keeps backslashes; quotes around a path are not part of it.
+                parts = shlex.split(raw, posix=system != "nt")
+            except ValueError as exc:
+                raise EditorError(f"Cannot read ${key}: {exc}") from None
             command = [part.strip('"').strip("'") for part in parts if part.strip('"').strip("'")]
             break
     if not command:
@@ -59,8 +77,12 @@ def editor_command(
         if found is None:
             return None
         return [found]
-    # Resolve the program so `EDITOR=code` finds code.cmd on Windows.
-    command[0] = which(command[0]) or command[0]
+    # Resolve the program: `EDITOR=code` finds code.cmd on Windows, ~ is home.
+    program = os.path.expandvars(os.path.expanduser(command[0]))
+    resolved = which(program) or (program if Path(program).is_file() else None)
+    if resolved is None:
+        raise EditorError(f"Editor not found: {command[0]}")
+    command[0] = resolved
     flag = _WAITING_FLAGS.get(_program(command[0]))
     if flag and flag not in command and "-w" not in command:
         command.append(flag)
@@ -76,13 +98,25 @@ def copy_name(name: str, diagram: bool) -> str:
             break
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(stem.replace("\\", "/")).name)
     stem = stem.strip(".-")[:60] or "draft"
+    if stem.split(".")[0].upper() in _DEVICE_NAMES:
+        stem = f"draft-{stem}"
     return f"{stem}{'.mmd' if diagram else '.md'}"
+
+
+def _lines(text: str) -> list[str]:
+    """Lines as the file has them: only newlines split, a final newline doesn't count."""
+    return text.replace("\r\n", "\n").removesuffix("\n").split("\n")
+
+
+def same_text(a: str, b: str) -> bool:
+    """Equal apart from line endings and a final newline, which editors change on save."""
+    return _lines(a) == _lines(b)
 
 
 def unified_diff(original: str, edited: str, name: str) -> str:
     """A unified diff, or "" when the lines are the same."""
     lines = difflib.unified_diff(
-        original.splitlines(), edited.splitlines(), fromfile=name, tofile=name, lineterm="",
+        _lines(original), _lines(edited), fromfile=name, tofile=name, lineterm="",
     )
     body = "\n".join(lines)
     return f"{body}\n" if body else ""
@@ -105,6 +139,11 @@ def fenced(text: str, lang: str) -> str:
     return f"{fence}{lang}\n{text.rstrip(chr(10))}\n{fence}"
 
 
+def prompt_safe(text: str) -> str:
+    """The prompt without control characters (argv can't even hold NUL)."""
+    return _PROMPT_CONTROL.sub("", text)
+
+
 def needs_attachment(body: str) -> bool:
     return len(body) > INLINE_LIMIT
 
@@ -112,7 +151,7 @@ def needs_attachment(body: str) -> bool:
 def file_prompt(label: str, diff: str, *, diverged: bool, attachment: Path | None = None) -> str:
     """What the agent gets after an edit of a file."""
     lines = [
-        f"I edited {label} in Blueprint. Apply this change to the file and to anything "
+        f"I edited `{label}` in Blueprint. Apply this change to the file and to anything "
         "that depends on it, then show the result in Blueprint.",
     ]
     if diverged:
@@ -120,7 +159,7 @@ def file_prompt(label: str, diff: str, *, diverged: bool, attachment: Path | Non
             "The file changed on disk while I was editing, so read the file first and "
             "apply the change by hand rather than as a patch."
         )
-    lines.append(f"The diff is in {attachment}." if attachment else fenced(diff, "diff"))
+    lines.append(f"The diff is in `{attachment}`." if attachment else fenced(diff, "diff"))
     return "\n".join(lines) + "\n"
 
 
@@ -130,7 +169,7 @@ def text_prompt(title: str, source: str, *, diagram: bool, attachment: Path | No
     lines = [
         f"I edited the {what} you sent ('{title}') in Blueprint. This is what I want instead; "
         "update what it describes, then send the new version to Blueprint.",
-        f"The new version is in {attachment}." if attachment else fenced(source, "mermaid" if diagram else "markdown"),
+        f"The new version is in `{attachment}`." if attachment else fenced(source, "mermaid" if diagram else "markdown"),
     ]
     return "\n".join(lines) + "\n"
 

@@ -87,11 +87,15 @@ description = "open Blueprint"
 ## Edit and hand it back
 
 Press `e` to open what Blueprint shows in your editor (`$VISUAL`, `$EDITOR`,
-then vim). Save and quit (`:wq`) and the change goes to the agent next to
-Blueprint as a diff, or as the new version of something it sent. Quit without
-saving (`:q!`) and nothing happens. Blueprint never writes the file itself: the
-agent applies the change, and you roll it back the way you roll back any agent
-change. With no agent there but a shell, Blueprint offers to start one.
+else vim, vi or nano). Save and quit (`:wq`) and the change goes to the agent
+next to Blueprint as a diff, or as the new version of something it sent. Quit
+without saving (`:q!`) and nothing happens. Blueprint never writes the file
+itself: the agent applies the change, and you roll it back the way you roll
+back any agent change.
+
+With no agent there but a shell, Blueprint offers to start one. An edit that
+could not be sent is kept: press `e` on that document to pick it up again, or
+save it empty to throw it away.
 
 ## Send things from an agent
 
