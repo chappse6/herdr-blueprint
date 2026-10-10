@@ -89,6 +89,18 @@ def editor_command(
     return command
 
 
+# Editors that open at a line given as +N.
+_LINE_EDITORS = {"vi", "nano", "hx", "helix", "kak", "micro", "emacs", "emacsclient", "ne", "joe"}
+
+
+def line_arg(command: list[str], line: int | None) -> list[str]:
+    """["+N"] when the editor opens at a line that way, else []."""
+    if not line:
+        return []
+    program = _program(command[0])
+    return [f"+{line}"] if "vim" in program or program in _LINE_EDITORS else []
+
+
 def copy_name(name: str, diagram: bool) -> str:
     """A safe file name for the copy: the original's stem, cleaned, with the right suffix."""
     stem = name
@@ -183,3 +195,4 @@ def agent_name(kind: str, pane_id: str) -> str:
     """A herdr agent name ([a-z][a-z0-9_-]{0,31}), one per kind and pane."""
     pane = re.sub(r"[^a-z0-9]+", "-", pane_id.lower()).strip("-")
     return f"bp-{kind}-{pane}"[:32].rstrip("-")
+

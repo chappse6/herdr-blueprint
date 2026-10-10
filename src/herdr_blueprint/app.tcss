@@ -210,3 +210,13 @@ AgentPicker {
     color: $text-muted;
     padding-top: 1;
 }
+
+/* Point mode: the selected document block, and the note line. */
+.pointed {
+    background: $accent 30%;
+}
+
+NoteLine {
+    dock: bottom;
+    margin: 0 1;
+}

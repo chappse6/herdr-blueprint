@@ -324,3 +324,43 @@ def describe(part: Part) -> str:
     if part.kind == "code":
         return f'the {part.label} code block' if part.label else "the code block"
     return f'the {part.kind} "{part.label}"'
+
+
+# --- the request -----------------------------------------------------------------------
+
+
+def _where(lines: tuple[int, int] | None, line_text: str) -> str:
+    if not lines:
+        return ""
+    span = f"line {lines[0]}" if lines[0] == lines[1] else f"lines {lines[0]}-{lines[1]}"
+    return f", {span}: `{line_text.strip()}`" if line_text.strip() else f", {span}"
+
+
+def point_prompt(
+    described: str,
+    note: str,
+    *,
+    lines: tuple[int, int] | None,
+    line_text: str,
+    file_label: str | None = None,
+    title: str = "",
+    diagram: bool = True,
+    source: str | None = None,
+    attachment=None,
+) -> str:
+    """What Enter sends: the part, where it is, the person's note, and what to do."""
+    from .edit import fenced
+
+    where = _where(lines, line_text)
+    if file_label is not None:
+        return (
+            f"In Blueprint I pointed at {described} in `{file_label}`{where}.\n{note}\n"
+            "Change it and anything it describes, then show the result in Blueprint.\n"
+        )
+    what = "diagram" if diagram else "note"
+    body = f"Its source is in `{attachment}`." if attachment else fenced(source or "", "mermaid" if diagram else "markdown")
+    return (
+        f"In Blueprint I pointed at {described} in the {what} you sent ('{title}'){where}.\n{note}\n"
+        "Change it and anything it describes, then send the new version to Blueprint.\n"
+        f"{body}\n"
+    )

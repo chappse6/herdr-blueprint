@@ -20,14 +20,15 @@ from textual import events
 from textual.app import App, ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.geometry import Region
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
-from textual.widgets import Footer, OptionList, Static
+from textual.widgets import Footer, Input, OptionList, Static
 from textual.widgets.markdown import MarkdownFence
 from textual.widgets.option_list import Option
 
 from . import config as config_store
-from . import edit
+from . import edit, point
 from .diagram import MAX_DIAGRAM_CHARS
 from .document import DiagramView, DocumentView, PlainView, as_code
 from .item import MAX_BYTES, Item, clean, is_large
@@ -87,6 +88,42 @@ class KeptEdit:
     base: str  # the text the person started from
     base_bytes: bytes | None  # the file as it was at `e`; None for text an agent sent
     edited: str
+
+
+@dataclass
+class KeptNote:
+    """A note about a part that the agent has not received yet."""
+
+    item: Item
+    part_id: str
+    text: str
+
+
+@dataclass
+class Request:
+    """Something for the agent: an edit, or a note about a part."""
+
+    key: tuple  # where its kept copy lives in BlueprintApp._kept
+    item: Item
+    described: str  # "your edit", 'the box "Tollgate"'
+    build: Callable[[pane.Source], str]  # the prompt for the agent that gets it
+    kept: KeptEdit | KeptNote
+
+    @property
+    def is_edit(self) -> bool:
+        return isinstance(self.kept, KeptEdit)
+
+
+class NoteLine(Input):
+    """One line under the drawing: what should change at the pointed part."""
+
+    BINDINGS = [Binding("escape", "cancel", "Back")]
+
+    def __init__(self, value: str = "") -> None:
+        super().__init__(value=value, placeholder="What should change here?  (Enter asks, Esc goes back)")
+
+    def action_cancel(self) -> None:
+        self.app.call_later(self.app.note_cancelled)
 
 
 def same_item(a: Item | None, b: Item | None) -> bool:
@@ -214,8 +251,11 @@ class BlueprintApp(App[None]):
         Binding("G", "jump(True)", show=False),
         Binding("ctrl+d", "page(1)", show=False),
         Binding("ctrl+u", "page(-1)", show=False),
-        # Only offered when there is something to edit.
+        # Only offered when there is something to point at; e again edits the text.
         Binding("e", "edit", "Edit"),
+        # Point mode only.
+        Binding("enter", "point_ask", "Ask", key_display="⏎"),
+        Binding("escape", "point_done", "Done", key_display="esc"),
         # Only offered when Blueprint knows the pane it was opened next to.
         Binding("a", "ask", "Ask"),
         Binding("o", "open_file", "Open"),
@@ -261,6 +301,14 @@ class BlueprintApp(App[None]):
         # Long prompt bodies for the agent; removed when Blueprint closes.
         self._attachments: Path | None = None
         self._shown_key: tuple | None = None
+        # What is on screen, for pointing: its text and whether a diagram is drawn.
+        self._shown_text = ""
+        self._shown_drawn = False
+        # Point mode.
+        self.pointing = False
+        self.parts: list[point.Part] = []
+        self.selected = 0
+        self._part_widgets: list = []  # document blocks, parallel to parts
         self.current: Item | None = None
         self.notice: str | None = None
         # A notice is a warning unless it reports something that worked.
@@ -324,6 +372,8 @@ class BlueprintApp(App[None]):
                 await self._open_locked(replace(self.current, draw=draw, at=time.time()))
 
     async def _open_locked(self, item: Item) -> None:
+        if self.pointing:
+            self._end_point()  # a send replaces the screen; a typed note is kept
         try:
             text = item.read()
         except OSError:
@@ -343,16 +393,19 @@ class BlueprintApp(App[None]):
             self.notice = None
         self.notice_ok = False
         await self._render_text(text, diagram=item.is_diagram, draw=draw, plain=plain)
+        self._shown_text, self._shown_drawn = text, item.is_diagram and draw
         self.current = item
         self.title_text = clean(item.title)
         previous_key = self._shown_key
         self._shown_key = doc_key(item)
-        dropped = self._kept.get(previous_key) if previous_key != self._shown_key else None
-        if dropped and previous_key[0] == "text" and not self._sending:
-            # Sent text can't be shown again, so its edit can't be reopened.
-            del self._kept[previous_key]
-            self.notice = f"Your unsent edit of '{clean(dropped.item.title)}' was dropped"
-            self.notice_ok = False
+        if previous_key and previous_key[0] == "text" and previous_key != self._shown_key and not self._sending:
+            # Sent text can't be shown again, so work kept for it can't be picked up.
+            dropped = [key for key, kept in self._kept.items() if doc_key(kept.item) == previous_key]
+            for key in dropped:
+                title = self._kept.pop(key).item.title
+            if dropped:
+                self.notice = f"Your unsent work on '{clean(title)}' was dropped"
+                self.notice_ok = False
         self.refresh_bindings()
         self._update_status()
 
@@ -408,6 +461,10 @@ class BlueprintApp(App[None]):
     # Actions ---------------------------------------------------------------
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action in ("point_ask", "point_done"):
+            return self.pointing
+        if self.pointing and action in ("ask", "open_file", "pick_theme", "reload", "quit", "jump", "page"):
+            return False  # point mode offers only its own keys
         # Hidden from the footer and the keys do nothing when there is no pane to use.
         if action == "ask":
             return bool(self.source and self.source.agent)
@@ -470,11 +527,12 @@ class BlueprintApp(App[None]):
     # Editing ------------------------------------------------------------------
 
     def _kept_for(self, item: Item | None) -> KeptEdit | None:
-        return self._kept.get(doc_key(item)) if item is not None else None
+        kept = self._kept.get(doc_key(item)) if item is not None else None
+        return kept if isinstance(kept, KeptEdit) else None
 
     def _editable(self) -> bool:
         item = self.current
-        if item is None or self._sending:
+        if item is None or self._sending or self.query(PlainView):
             return False
         if item.kind != "file" or self._kept_for(item):
             return True
@@ -484,9 +542,21 @@ class BlueprintApp(App[None]):
             return False
 
     def action_edit(self) -> None:
+        """First e points at a part; e while pointing edits the text there."""
+        if not self._editable():
+            return
+        if not self.pointing:
+            self._start_point()
+            return
+        part = self.parts[self.selected] if self.parts else None
+        line = part.lines[0] if part and part.lines and part.kind != "diagram" else None
+        self._end_point()
+        self._edit_text(line)
+
+    def _edit_text(self, line: int | None = None) -> None:
         """Open what is shown in the editor. Save and quit sends it; quit without saving doesn't."""
         item = self.current
-        if item is None or not self._editable():
+        if item is None:
             return
         kept = self._kept_for(item)
         if kept:
@@ -506,7 +576,7 @@ class BlueprintApp(App[None]):
         if not command:
             self._show_notice("No editor found: set $EDITOR")
             return
-        outcome = self._edit_copy(item, start, command)
+        outcome = self._edit_copy(item, start, [*command, *edit.line_arg(command, line)])
         if outcome is None:
             return
         saved, edited = outcome
@@ -523,8 +593,9 @@ class BlueprintApp(App[None]):
             self._kept.pop(key, None)
             self._show_notice("No changes")
             return
-        self._kept[key] = KeptEdit(item, base, base_bytes, edited)
-        self._send_kept(self._kept[key])
+        kept_edit = KeptEdit(item, base, base_bytes, edited)
+        self._kept[key] = kept_edit
+        self._send_request(Request(key, item, "your edit", lambda target: self._prompt_for(kept_edit, target), kept_edit))
 
     def _edit_base(self, item: Item) -> tuple[str, bytes | None]:
         if item.kind != "file":
@@ -578,13 +649,15 @@ class BlueprintApp(App[None]):
             raise error
         return code
 
-    def _send_kept(self, kept: KeptEdit) -> None:
+    # Sending to the agent -------------------------------------------------------
+
+    def _send_request(self, request: Request) -> None:
         self._sending = True
         self.refresh_bindings()
-        self._show_notice("Sending your edit…", ok=True)
-        self.run_worker(lambda: self._deliver(kept), thread=True, group="edit", exit_on_error=False)
+        self._show_notice("Sending your edit…" if request.is_edit else "Asking…", ok=True)
+        self.run_worker(lambda: self._deliver(request), thread=True, group="edit", exit_on_error=False)
 
-    def _deliver(self, kept: KeptEdit) -> None:
+    def _deliver(self, request: Request) -> None:
         """Find the agent and send (worker thread). Never raises."""
         try:
             if self.source is None:
@@ -594,29 +667,29 @@ class BlueprintApp(App[None]):
                 if self._closing:
                     return
                 if fresh.agent:
-                    result = self._prompter(fresh, self._prompt_for(kept, fresh))
+                    result = self._prompter(fresh, edit.prompt_safe(request.build(fresh)))
                 elif self._idle_shell(fresh.pane_id) and (kinds := self._kinds()):
-                    self.call_from_thread(self._offer_agent, kept, fresh, kinds)
+                    self.call_from_thread(self._offer_agent, request, fresh, kinds)
                     return
                 else:
                     result = (False, "No agent next to Blueprint")
         except Exception as exc:
             result = (False, f"Could not send: {exc}")
-        self._after_send(kept, *result)
+        self._after_send(request, *result)
 
-    def _offer_agent(self, kept: KeptEdit, fresh: pane.Source, kinds: list[str]) -> None:
+    def _offer_agent(self, request: Request, fresh: pane.Source, kinds: list[str]) -> None:
         def chosen(kind: str | None) -> None:
             if not kind:
-                self._sent(kept, False, "No agent started")
+                self._sent(request, False, "No agent started")
                 return
             self._show_notice(f"Starting {kind}…", ok=True)
             self.run_worker(
-                lambda: self._start_and_send(kept, fresh, kind), thread=True, group="edit", exit_on_error=False,
+                lambda: self._start_and_send(request, fresh, kind), thread=True, group="edit", exit_on_error=False,
             )
 
         self.push_screen(AgentPicker(kinds), chosen)
 
-    def _start_and_send(self, kept: KeptEdit, fresh: pane.Source, kind: str) -> None:
+    def _start_and_send(self, request: Request, fresh: pane.Source, kind: str) -> None:
         try:
             started, message = self._starter(fresh, kind)
             if started and not self._closing:
@@ -624,36 +697,38 @@ class BlueprintApp(App[None]):
                 target = ready if ready.agent else replace(fresh, agent=kind)
                 if self._closing:
                     return
-                started, message = self._prompter(target, self._prompt_for(kept, target))
+                started, message = self._prompter(target, edit.prompt_safe(request.build(target)))
         except Exception as exc:
             started, message = False, f"Could not start {kind}: {exc}"
-        self._after_send(kept, started, message)
+        self._after_send(request, started, message)
 
-    def _after_send(self, kept: KeptEdit, ok: bool, message: str) -> None:
+    def _after_send(self, request: Request, ok: bool, message: str) -> None:
         if self._closing:
             return
         try:
-            self.call_from_thread(self._sent, kept, ok, message)
+            self.call_from_thread(self._sent, request, ok, message)
         except RuntimeError:
             pass  # Blueprint closed meanwhile
 
-    def _sent(self, kept: KeptEdit, ok: bool, message: str) -> None:
+    def _sent(self, request: Request, ok: bool, message: str) -> None:
         self._sending = False
-        key = doc_key(kept.item)
-        here = same_item(kept.item, self.current)
+        here = same_item(request.item, self.current)
         if ok:
-            if self._kept.get(key) is kept:
-                del self._kept[key]
+            if self._kept.get(request.key) is request.kept:
+                del self._kept[request.key]
             agent = message.removeprefix("Sent to ") if message.startswith("Sent to ") else "the agent"
-            self._show_notice(f"Sent your edit to {agent}", ok=True)
+            text = f"Sent your edit to {agent}" if request.is_edit else f"Asked {agent} about {request.described}"
+            self._show_notice(text, ok=True)
+        elif not request.is_edit:
+            self._show_notice(f"{clean(message)}. Your note was kept; point at it and press Enter to send it again")
         elif here:
             self._show_notice(f"{clean(message)}. Your edit was not sent; press e to edit it again")
-        elif key[0] == "file":
-            where = clean(kept.item.title)
+        elif request.key[0] == "file":
+            where = clean(request.item.title)
             self._show_notice(f"{clean(message)}. Your edit was not sent; open {where} again and press e")
         else:
-            self._kept.pop(key, None)
-            self._show_notice(f"{clean(message)}. Your edit of '{clean(kept.item.title)}' was not sent and was dropped")
+            self._kept.pop(request.key, None)
+            self._show_notice(f"{clean(message)}. Your edit of '{clean(request.item.title)}' was not sent and was dropped")
         self.refresh_bindings()
 
     def _prompt_for(self, kept: KeptEdit, target: pane.Source) -> str:
@@ -667,13 +742,174 @@ class BlueprintApp(App[None]):
                 diverged = True
             stem = edit.copy_name(item.path.name, diagram=False).removesuffix(".md")
             attachment = self._attach(diff, stem, ".diff") if edit.needs_attachment(diff) else None
-            text = edit.file_prompt(label, diff, diverged=diverged, attachment=attachment)
-        else:
-            source = kept.edited
+            return edit.file_prompt(label, diff, diverged=diverged, attachment=attachment)
+        source = kept.edited
+        stem, suffix = edit.copy_name(item.title, diagram=item.is_diagram).rsplit(".", 1)
+        attachment = self._attach(source, stem, f".{suffix}") if edit.needs_attachment(source) else None
+        return edit.text_prompt(clean(item.title), source, diagram=item.is_diagram, attachment=attachment)
+
+    # Point mode -----------------------------------------------------------------
+
+    def _compute_parts(self) -> list[point.Part]:
+        self._part_widgets = []
+        views = self.query(DiagramView)
+        if views:
+            view = views.first()
+            parts = point.diagram_parts(view.source, view.drawing.padding, view.drawing.text) if view.drawing else []
+            return parts or [point.whole_diagram(view.source)]
+        if self.current is not None and self.current.is_diagram:
+            return [point.whole_diagram(self._shown_text)]  # shown as text, not drawn
+        documents = self.query(DocumentView)
+        if documents:
+            blocks = [b for b in documents.first().children if hasattr(b, "source_range")]
+            self._part_widgets = blocks
+            described = [(b._token.type, b.source_range, getattr(b._token, "info", "") or "") for b in blocks]
+            return point.document_parts(described, self._shown_text)
+        return []
+
+    def _start_point(self, select: int = 0) -> None:
+        self.parts = self._compute_parts()
+        if not self.parts:
+            return
+        self.pointing = True
+        self.refresh_bindings()
+        self._select(min(select, len(self.parts) - 1))
+
+    def _select(self, index: int) -> None:
+        self.selected = index
+        part = self.parts[index]
+        body = self.query_one("#body", VerticalScroll)
+        views = self.query(DiagramView)
+        if views:
+            view = views.first()
+            view.show(part if part.boxes else None)
+            if part.boxes:
+                box = part.boxes[0]
+                region = view.virtual_region
+                # +1: the view's top padding (see app.tcss).
+                body.scroll_to_region(
+                    Region(region.x + box.x, region.y + 1 + box.y, box.width, box.height), animate=False,
+                )
+            return
+        for i, widget in enumerate(self._part_widgets):
+            widget.set_class(i == index, "pointed")
+        if index < len(self._part_widgets):
+            body.scroll_to_widget(self._part_widgets[index], animate=False)
+
+    def _end_point(self) -> None:
+        notes = self.query(NoteLine)
+        if notes:
+            self._keep_note(notes.first().value)
+            notes.remove()
+        self.pointing = False
+        for view in self.query(DiagramView):
+            view.show(None)
+        for widget in self._part_widgets:
+            widget.remove_class("pointed")
+        self._part_widgets = []
+        self.refresh_bindings()
+
+    def _note_key(self) -> tuple | None:
+        if self.current is None or not self.parts:
+            return None
+        return (doc_key(self.current), self.parts[self.selected].id)
+
+    def _keep_note(self, text: str) -> None:
+        key = self._note_key()
+        if key is None:
+            return
+        if text.strip():
+            self._kept[key] = KeptNote(self.current, key[1], text)
+        elif isinstance(self._kept.get(key), KeptNote):
+            del self._kept[key]
+
+    def action_point_ask(self) -> None:
+        if not self.pointing or self._sending or self.query(NoteLine):
+            return
+        kept = self._kept.get(self._note_key())
+        note = NoteLine(kept.text if isinstance(kept, KeptNote) else "")
+        self.mount(note, before=self.query_one(Footer))
+        note.focus()
+
+    def note_cancelled(self) -> None:
+        """Esc in the note: keep the words, go back to pointing."""
+        notes = self.query(NoteLine)
+        if notes:
+            self._keep_note(notes.first().value)
+            notes.remove()
+        self.set_focus(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if not isinstance(event.input, NoteLine):
+            return
+        text = event.value.strip()
+        if not text:
+            self.note_cancelled()
+            return
+        item, part = self.current, self.parts[self.selected]
+        key = self._note_key()
+        assert item is not None and key is not None
+        kept = KeptNote(item, part.id, text)
+        self._kept[key] = kept
+        event.input.remove()
+        self.set_focus(None)
+        self.pointing = False  # the note is out of the line now; nothing to keep on leaving
+        self._end_point()
+        source_lines = self._shown_text.split("\n")
+        line_text = source_lines[part.lines[0] - 1] if part.lines and part.lines[0] <= len(source_lines) else ""
+        shown = self._shown_text
+        described = point.describe(part)
+
+        def build(target: pane.Source) -> str:
+            if item.kind == "file" and item.path is not None:
+                return point.point_prompt(
+                    described, text, lines=part.lines, line_text=line_text,
+                    file_label=edit.display_path(item.path, target.cwd),
+                )
             stem, suffix = edit.copy_name(item.title, diagram=item.is_diagram).rsplit(".", 1)
-            attachment = self._attach(source, stem, f".{suffix}") if edit.needs_attachment(source) else None
-            text = edit.text_prompt(clean(item.title), source, diagram=item.is_diagram, attachment=attachment)
-        return edit.prompt_safe(text)
+            attachment = self._attach(shown, stem, f".{suffix}") if edit.needs_attachment(shown) else None
+            return point.point_prompt(
+                described, text, lines=part.lines, line_text=line_text, title=clean(item.title),
+                diagram=item.is_diagram, source=shown, attachment=attachment,
+            )
+
+        self._send_request(Request(key, item, described, build, kept))
+
+    def action_point_done(self) -> None:
+        if self.query(NoteLine):
+            self.note_cancelled()
+        else:
+            self._end_point()
+
+    def on_diagram_view_drawn(self, event: DiagramView.Drawn) -> None:
+        # A redraw (theme, resize) can change the layout: find the parts again.
+        if self.pointing and self.query(DiagramView):
+            chosen = self.parts[self.selected].id if self.parts else ""
+            self.parts = self._compute_parts()
+            ids = [p.id for p in self.parts]
+            self._select(ids.index(chosen) if chosen in ids else 0)
+
+    def on_diagram_view_clicked(self, event: DiagramView.Clicked) -> None:
+        if self._sending or not self._editable():
+            return
+        if not self.pointing:
+            self._start_point()
+        for i, part in enumerate(self.parts):
+            if any(box.contains(event.x, event.y) for box in part.boxes):
+                self._select(i)
+                return
+
+    def on_click(self, event: events.Click) -> None:
+        # A click on a document block points at it.
+        widget = event.widget
+        while widget is not None and not (hasattr(widget, "source_range") and isinstance(widget.parent, DocumentView)):
+            widget = widget.parent
+        if widget is None or self._sending or not self._editable():
+            return
+        if not self.pointing:
+            self._start_point()
+        if widget in self._part_widgets:
+            self._select(self._part_widgets.index(widget))
 
     def _attach(self, text: str, stem: str, suffix: str) -> Path | None:
         """Put a long prompt body in its own file for the agent; None to inline it instead."""
@@ -719,7 +955,17 @@ class BlueprintApp(App[None]):
         self.push_screen(ThemePicker(self.theme), chosen)
 
     def action_move(self, dx: int, dy: int) -> None:
-        """Scroll like vim: j/k one line, h/l a few columns."""
+        """Scroll like vim: j/k one line, h/l a few columns. In point mode, move the selection."""
+        if self.pointing:
+            if self.query(NoteLine) or not self.parts:
+                return
+            if self._part_widgets or not self.parts[self.selected].boxes:
+                if dy:  # documents: next or previous block
+                    self._select(max(0, min(len(self.parts) - 1, self.selected + dy)))
+                return
+            direction = "right" if dx > 0 else "left" if dx < 0 else "down" if dy > 0 else "up"
+            self._select(point.nearest(self.parts, self.selected, direction))
+            return
         plain = self.query(PlainView)
         if plain:
             plain.first().scroll_relative(x=dx * SIDE_STEP, y=dy, animate=False)

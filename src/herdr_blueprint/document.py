@@ -11,13 +11,17 @@ import re
 from functools import partial
 
 from rich.text import Text
+from rich.style import Style
+from textual import events
 from textual.app import App
 from textual.content import Content
+from textual.message import Message
 from textual.widgets import Log, Markdown, Static
 from textual.widgets.markdown import MarkdownFence
 from textual.worker import get_current_worker
 
 from .diagram import DiagramError, Drawing, draw_diagram, render_diagram
+from .point import Part, highlight
 from .themes import palette_for_theme
 
 PLACEHOLDER = "Drawing diagram…"
@@ -124,6 +128,34 @@ class DiagramView(Static):
         self._requested: tuple[str, int | None] | None = None
         # The last drawing shown, with its layout; None until drawn (or if it failed).
         self.drawing: Drawing | None = None
+        # The part shown highlighted in point mode.
+        self.shown: Part | None = None
+
+    class Drawn(Message):
+        """A new drawing is on screen (first draw, theme change, resize)."""
+
+        def __init__(self, view: "DiagramView") -> None:
+            super().__init__()
+            self.view = view
+
+    class Clicked(Message):
+        """A click at a drawing cell."""
+
+        def __init__(self, view: "DiagramView", x: int, y: int) -> None:
+            super().__init__()
+            self.view, self.x, self.y = view, x, y
+
+    def show(self, part: Part | None) -> None:
+        """Highlight `part` (None for none) in the current drawing."""
+        self.shown = part
+        if self.drawing is not None:
+            text = self.drawing.text if part is None else highlight(self.drawing.text, part, Style(reverse=True))
+            self.update(Content.from_rich_text(text))
+
+    def on_click(self, event: events.Click) -> None:
+        offset = event.get_content_offset(self)
+        if offset is not None:
+            self.post_message(self.Clicked(self, offset.x, offset.y))
 
     def on_mount(self) -> None:
         self.watch(self.app, "theme", self._redraw, init=True)
@@ -150,3 +182,4 @@ class DiagramView(Static):
     def _show(self, drawing: Drawing | None, content: Content) -> None:
         self.drawing = drawing
         self.update(content)
+        self.post_message(self.Drawn(self))
