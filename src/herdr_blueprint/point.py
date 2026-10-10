@@ -224,6 +224,45 @@ def _aligned(parts: list[Part], text: Text) -> list[Part]:
     return []
 
 
+# --- documents ------------------------------------------------------------------------
+
+_BLOCK_KINDS = {
+    "heading_open": "heading", "paragraph_open": "paragraph", "bullet_list_open": "list",
+    "ordered_list_open": "list", "table_open": "table", "blockquote_open": "quote",
+    "fence": "code", "code_block": "code", "hr": "rule",
+}
+_MARKERS = re.compile(r"^\s*(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)+")
+
+
+def _cut(text: str, limit: int = 40) -> str:
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def document_parts(blocks: list[tuple[str, tuple[int, int], str]], source: str) -> list[Part]:
+    """Top-level Markdown blocks (token type, 0-based [start, end) lines, fence info) as parts."""
+    lines = source.split("\n")
+    parts, heading = [], ""
+    for number, (token_type, (start, end), info) in enumerate(blocks):
+        kind = _BLOCK_KINDS.get(token_type, "block")
+        if kind == "code" and info.strip().split()[:1] == ["mermaid"]:
+            kind = "diagram"
+        while end > start + 1 and end <= len(lines) and not lines[end - 1].strip():
+            end -= 1  # the parser counts a trailing blank line into lists
+        body = [line for line in lines[start:end] if line.strip()]
+        if kind in ("code", "diagram"):
+            label = info.strip().split()[0] if info.strip() else _cut(body[1].strip() if len(body) > 1 else "")
+        elif kind == "table" and body:
+            label = _cut(" | ".join(cell.strip() for cell in body[0].strip().strip("|").split("|")))
+        elif kind == "rule":
+            label = ""
+        else:
+            label = _cut(_MARKERS.sub("", body[0]).strip() if body else "")
+        parts.append(Part(kind, f"block-{number}", label, (), (start + 1, max(start + 1, end)), heading))
+        if kind == "heading":
+            heading = label
+    return parts
+
+
 # --- moving and showing --------------------------------------------------------------
 
 
@@ -275,5 +314,13 @@ def describe(part: Part) -> str:
     if part.kind == "message":
         return f'the message "{part.label}" {part.detail}'.rstrip()
     if part.kind == "diagram":
+        if part.id.startswith("block-"):
+            return f'the diagram block under "{part.detail}"' if part.detail else "the diagram block"
         return "the whole diagram"
+    if part.kind == "rule":
+        return "the horizontal rule"
+    if part.kind == "table" and part.detail:
+        return f'the table under "{part.detail}"'
+    if part.kind == "code":
+        return f'the {part.label} code block' if part.label else "the code block"
     return f'the {part.kind} "{part.label}"'

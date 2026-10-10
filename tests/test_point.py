@@ -153,3 +153,75 @@ def test_descriptions():
     flow = point.diagram_parts(FLOW, (4, 2, 4), draw(FLOW))
     assert point.describe(flow[1]) == 'the box "Tollgate"'
     assert point.describe(point.whole_diagram("graph LR\n  A --> B")) == "the whole diagram"
+
+
+# --- documents --------------------------------------------------------------------
+
+from textual.app import App  # noqa: E402
+
+from herdr_blueprint.document import DocumentView  # noqa: E402
+
+DOC = """# Login flow
+
+Authorization code with PKCE. The app never sees the password, and the code it gets is single-use.
+
+## Steps
+
+| Step | Code |
+|---|---|
+| authorize | src/routes/authorize.ts:20 |
+
+- one
+- two
+
+> Careful here.
+
+```mermaid
+graph LR
+  A --> B
+```
+
+```ts
+const x = 1;
+```
+
+---
+"""
+
+
+async def blocks_of(markdown: str):
+    class Host(App):
+        def compose(self):
+            yield DocumentView(markdown)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        view = app.query_one(DocumentView)
+        return [(b._token.type, b.source_range, getattr(b._token, "info", "")) for b in view.children
+                if hasattr(b, "source_range")]
+
+
+async def test_document_blocks_become_parts_with_their_lines():
+    parts = point.document_parts(await blocks_of(DOC), DOC)
+    assert [(p.kind, p.label, p.lines) for p in parts] == [
+        ("heading", "Login flow", (1, 1)),
+        ("paragraph", "Authorization code with PKCE. The app ne…", (3, 3)),
+        ("heading", "Steps", (5, 5)),
+        ("table", "Step | Code", (7, 9)),
+        ("list", "one", (11, 12)),
+        ("quote", "Careful here.", (14, 14)),
+        ("diagram", "mermaid", (16, 19)),
+        ("code", "ts", (21, 23)),
+        ("rule", "", (25, 25)),
+    ]
+
+
+async def test_document_part_descriptions():
+    parts = point.document_parts(await blocks_of(DOC), DOC)
+    described = [point.describe(p) for p in parts]
+    assert described[0] == 'the heading "Login flow"'
+    assert described[1] == 'the paragraph "Authorization code with PKCE. The app ne…"'
+    assert described[3] == 'the table under "Steps"'
+    assert described[6] == "the diagram block under \"Steps\""
+    assert described[8] == "the horizontal rule"
