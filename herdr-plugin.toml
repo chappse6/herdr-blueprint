@@ -18,6 +18,13 @@ title = "Blueprint"
 placement = "split"
 command = ["uv", "run", "--no-sync", "python", "-m", "herdr_blueprint"]
 
+# Runs the editor for `e` in a pane below the viewer, so the preview stays in sight.
+[[panes]]
+id = "editor"
+title = "Edit"
+placement = "split"
+command = ["uv", "run", "--no-sync", "python", "-m", "herdr_blueprint", "edit-session"]
+
 [[actions]]
 id = "open"
 title = "Open Blueprint"

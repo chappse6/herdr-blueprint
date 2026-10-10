@@ -43,3 +43,9 @@ def test_finding_the_plugin_needs_only_uv():
     for text in (SKILL, README):
         assert "jq " not in text
         assert "herdr plugin list --plugin seeun.blueprint --json | uv run --no-project" in text
+
+
+def test_the_editor_pane_runs_the_edit_session():
+    (editor,) = [pane for pane in MANIFEST["panes"] if pane["id"] == "editor"]
+    assert editor["command"] == ["uv", "run", "--no-sync", "python", "-m", "herdr_blueprint", "edit-session"]
+    assert editor["placement"] == "split"

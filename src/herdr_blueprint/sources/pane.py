@@ -150,6 +150,30 @@ def start_agent(herdr: str, source: Source, kind: str, run=subprocess.run) -> tu
     return False, f"Could not start {kind}: {str(code or 'no answer from herdr').replace('_', ' ')}"
 
 
+PLUGIN_ID = "seeun.blueprint"
+
+
+def open_editor_pane(herdr: str, target_pane: str | None, command: list[str], copy: Path, run=subprocess.run) -> str | None:
+    """Open the editor pane below `target_pane` on `copy`: its pane id, or None (outside herdr, or it failed)."""
+    if not target_pane:
+        return None
+    from ..edit import SESSION_COMMAND, SESSION_COPY
+
+    result, _code = _herdr(herdr, [
+        "plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "editor",
+        "--placement", "split", "--direction", "down", "--target-pane", target_pane,
+        "--env", f"{SESSION_COPY}={copy}", "--env", f"{SESSION_COMMAND}={json.dumps(command)}", "--focus",
+    ], run)
+    try:
+        return str(result["plugin_pane"]["pane"]["pane_id"]) if result else None
+    except (KeyError, TypeError):
+        return None
+
+
+def focus_plugin_pane(herdr: str, pane_id: str, run=subprocess.run) -> None:
+    _herdr(herdr, ["plugin", "pane", "focus", pane_id], run)
+
+
 def _git_files(folder: Path, run) -> list[Path] | None:
     try:
         done = run(

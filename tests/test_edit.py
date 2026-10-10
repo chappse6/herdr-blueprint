@@ -172,3 +172,36 @@ def test_agent_names_are_valid_and_per_pane():
     assert edit.agent_name("claude", "w12:pAB") == "bp-claude-w12-pab"
     name = edit.agent_name("mastracode", "w999:p" + "Z" * 40)
     assert len(name) <= 32 and name[0].isalpha()
+
+
+# --- the editor pane's session -----------------------------------------------------------
+
+def test_the_session_runs_the_editor_and_leaves_its_exit_code(tmp_path):
+    import json
+    import subprocess
+
+    copy = tmp_path / "flow.md"
+    copy.write_text("x", encoding="utf-8")
+    seen = []
+
+    def run(command):
+        seen.append(command)
+        return subprocess.CompletedProcess(command, 3)
+
+    env = {edit.SESSION_COPY: str(copy), edit.SESSION_COMMAND: json.dumps(["nvim", "+4"])}
+    assert edit.run_session(env, run=run) == 0
+    assert seen == [["nvim", "+4", str(copy)]]
+    assert edit.exit_file(copy).read_text() == "3"
+
+
+def test_an_editor_that_cannot_start_leaves_127(tmp_path):
+    import json
+
+    def run(command):
+        raise FileNotFoundError(command[0])
+
+    copy = tmp_path / "flow.md"
+    copy.write_text("x", encoding="utf-8")
+    env = {edit.SESSION_COPY: str(copy), edit.SESSION_COMMAND: json.dumps(["nope"])}
+    edit.run_session(env, run=run)
+    assert edit.exit_file(copy).read_text() == "127"

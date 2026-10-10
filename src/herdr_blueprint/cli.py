@@ -12,7 +12,7 @@ from pathlib import Path
 from .item import VIEWABLE_SUFFIXES
 from .sources import inbox, pane
 
-PLUGIN_ID = "seeun.blueprint"
+PLUGIN_ID = pane.PLUGIN_ID
 
 DRAW_HELP = "draw Mermaid diagrams (slower; without it they stay as text)"
 
@@ -85,6 +85,7 @@ def _parser() -> argparse.ArgumentParser:
     refresh = commands.add_parser("refresh", help="re-read and redraw what the viewer shows")
     refresh.add_argument("--draw", action="store_true", help=DRAW_HELP)
     commands.add_parser("open", help="open the viewer pane in herdr")
+    commands.add_parser("edit-session", help=argparse.SUPPRESS)
     commands.add_parser("install-skill", help="add the Blueprint skill to Claude Code and Codex")
     commands.add_parser("uninstall-skill", help="remove the Blueprint skill")
     return parser
@@ -136,6 +137,11 @@ def main(argv: list[str] | None = None) -> int:
         for line in step(skill, Path.home()) or ["nothing to do"]:
             print(line)
         return 0
+
+    if args.command == "edit-session":
+        from .edit import run_session
+
+        return run_session(os.environ)
 
     herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
     if args.command == "open":

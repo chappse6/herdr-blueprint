@@ -271,3 +271,37 @@ def test_an_argument_herdr_cannot_take_never_raises():
     assert pane.send_prompt("herdr", pane.Source("w1:p1", agent="claude"), "a\x00b", run=nul_is_invalid) == (
         False, "Could not reach claude",
     )
+
+
+def test_the_editor_pane_opens_below_blueprint_with_the_session_settings(tmp_path):
+    seen = {}
+
+    def run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return completed(json.dumps({"result": {"plugin_pane": {"pane": {"pane_id": "w1:pE"}}}}))(cmd)
+
+    copy = tmp_path / "flow.md"
+    assert pane.open_editor_pane("herdr", "w1:pB", ["nvim", "+3"], copy, run=run) == "w1:pE"
+    cmd = seen["cmd"]
+    assert cmd[:4] == ["herdr", "plugin", "pane", "open"]
+    assert cmd[cmd.index("--entrypoint") + 1] == "editor"
+    assert cmd[cmd.index("--direction") + 1] == "down" and cmd[cmd.index("--target-pane") + 1] == "w1:pB"
+    envs = [cmd[i + 1] for i, part in enumerate(cmd) if part == "--env"]
+    assert f"BLUEPRINT_EDIT_COPY={copy}" in envs and 'BLUEPRINT_EDIT_COMMAND=["nvim", "+3"]' in envs
+    assert "--focus" in cmd
+
+
+def test_no_editor_pane_outside_herdr_or_on_errors(tmp_path):
+    assert pane.open_editor_pane("herdr", None, ["nvim"], tmp_path / "x.md") is None
+    assert pane.open_editor_pane("herdr", "w1:pB", ["nvim"], tmp_path / "x.md", run=completed(error_json("x"), 1)) is None
+
+
+def test_focusing_a_plugin_pane():
+    seen = {}
+
+    def run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return completed("{}")(cmd)
+
+    pane.focus_plugin_pane("herdr", "w1:pE", run=run)
+    assert seen["cmd"] == ["herdr", "plugin", "pane", "focus", "w1:pE"]

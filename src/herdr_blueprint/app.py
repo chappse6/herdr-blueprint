@@ -91,6 +91,21 @@ class KeptEdit:
 
 
 @dataclass
+class LiveEdit:
+    """The editor running in the pane below Blueprint, on a copy in `folder`."""
+
+    item: Item
+    kept: "KeptEdit | None"
+    base: str
+    base_bytes: bytes | None
+    folder: Path
+    copy: Path
+    before: tuple[int, int]  # the copy's (mtime_ns, size) when the editor started
+    pane_id: str
+    stop: asyncio.Event
+
+
+@dataclass
 class KeptNote:
     """A note about a part that the agent has not received yet."""
 
@@ -278,6 +293,9 @@ class BlueprintApp(App[None]):
         starter: Callable[[pane.Source, str], tuple[bool, str]] | None = None,
         idle_shell: Callable[[str], bool] | None = None,
         kinds: Callable[[], list[str]] | None = None,
+        pane_editor: Callable[[list[str], Path], str | None] | None = None,
+        focus_pane: Callable[[str], None] | None = None,
+        pane_alive: Callable[[str], bool] | None = None,
     ) -> None:
         super().__init__()
         self.settings = settings or config_store.load()
@@ -294,6 +312,16 @@ class BlueprintApp(App[None]):
         self._starter = starter or (lambda src, kind: pane.start_agent(herdr, src, kind))
         self._idle_shell = idle_shell or (lambda pane_id: pane.shell_is_idle(herdr, pane_id))
         self._kinds = kinds or edit.kinds_on_path
+        # The live editor pane (inside herdr): open, focus, and check it.
+        own_pane = os.environ.get("HERDR_PANE_ID")
+        self._pane_editor = pane_editor or (
+            lambda command, copy: pane.open_editor_pane(herdr, own_pane, command, copy) if self.source else None
+        )
+        self._focus_pane = focus_pane or (lambda pane_id: pane.focus_plugin_pane(herdr, pane_id))
+        self._pane_alive = pane_alive or (lambda pane_id: pane.pane_exists(herdr, pane_id))
+        self._live: LiveEdit | None = None
+        self._held: Item | None = None  # the newest send that arrived during a live edit
+        self.preview_text: str | None = None  # what the live preview shows
         # Unsent edits, one per document; the next `e` on that document reopens it.
         self._kept: dict[tuple, KeptEdit] = {}
         self._sending = False
@@ -359,13 +387,22 @@ class BlueprintApp(App[None]):
 
     # Rendering -------------------------------------------------------------
 
+    @property
+    def editing(self) -> bool:
+        return self._live is not None
+
     async def open_item(self, item: Item) -> None:
         """Replace the screen with `item`. The previous one is dropped."""
+        if self._live is not None:
+            self._held = item  # shown, or dropped, when the editor closes
+            return
         async with self._render_lock:
             await self._open_locked(item)
 
     async def refresh_current(self, draw: bool) -> None:
         """Re-read and redraw what is on screen, with the worker's draw flag."""
+        if self._live is not None:
+            return  # the editor is open on what is shown
         # Read `current` under the lock, so a send in progress is not undone.
         async with self._render_lock:
             if self.current is not None:
@@ -531,6 +568,8 @@ class BlueprintApp(App[None]):
         return kept if isinstance(kept, KeptEdit) else None
 
     def _editable(self) -> bool:
+        if self._live is not None:
+            return True  # e focuses the editor pane
         item = self.current
         if item is None or self._sending or self.query(PlainView):
             return False
@@ -543,6 +582,9 @@ class BlueprintApp(App[None]):
 
     def action_edit(self) -> None:
         """First e points at a part; e while pointing edits the text there."""
+        if self._live is not None:
+            self._focus_pane(self._live.pane_id)
+            return
         if not self._editable():
             return
         if not self.pointing:
@@ -576,26 +618,150 @@ class BlueprintApp(App[None]):
         if not command:
             self._show_notice("No editor found: set $EDITOR")
             return
-        outcome = self._edit_copy(item, start, [*command, *edit.line_arg(command, line)])
+        command = [*command, *edit.line_arg(command, line)]
+        if self._start_live(item, kept, base, base_bytes, start, command):
+            return
+        outcome = self._edit_copy(item, start, command)
         if outcome is None:
             return
-        saved, edited = outcome
+        self._after_edit(item, kept, base, base_bytes, *outcome)
+
+    def _after_edit(
+        self, item: Item, kept: KeptEdit | None, base: str, base_bytes: bytes | None, saved: bool, edited: str,
+    ) -> bool:
+        """Act on the editor's result; True when the change went off to the agent."""
         key = doc_key(item)
         if not saved:
             # :q! keeps whatever was waiting; nothing is sent.
             self._show_notice("Not saved. Your edit is kept; press e to edit it again" if kept else "No changes")
-            return
+            return False
         if kept and not edited.strip():
             del self._kept[key]
             self._show_notice("Edit thrown away")
-            return
+            return False
         if edit.same_text(edited, base):
             self._kept.pop(key, None)
             self._show_notice("No changes")
-            return
+            return False
         kept_edit = KeptEdit(item, base, base_bytes, edited)
         self._kept[key] = kept_edit
         self._send_request(Request(key, item, "your edit", lambda target: self._prompt_for(kept_edit, target), kept_edit))
+        return True
+
+    # The live editor pane -------------------------------------------------------
+
+    def _start_live(
+        self, item: Item, kept: KeptEdit | None, base: str, base_bytes: bytes | None, text: str, command: list[str],
+    ) -> bool:
+        """Open the editor in a pane below, with a live preview. False to borrow this pane instead."""
+        name = edit.copy_name(item.path.name if item.path else item.title, diagram=item.is_diagram)
+        try:
+            folder = Path(tempfile.mkdtemp(prefix="blueprint-edit-"))
+            copy = folder / name
+            copy.write_text(text, encoding="utf-8", newline="")
+            stat = copy.stat()
+        except OSError:
+            return False
+        try:
+            pane_id = self._pane_editor(command, copy)
+        except Exception:
+            pane_id = None
+        if not pane_id:
+            shutil.rmtree(folder, ignore_errors=True)
+            return False
+        live = LiveEdit(item, kept, base, base_bytes, folder, copy, (stat.st_mtime_ns, stat.st_size), pane_id, asyncio.Event())
+        self._live = live
+        self._show_notice(f"Editing {name}: save to preview, quit to finish", ok=True)
+        self.run_worker(self._watch_live(live), group="live", exit_on_error=False)
+        self._live_timer = self.set_interval(2, self._check_live_pane)
+        self.refresh_bindings()
+        return True
+
+    async def _watch_live(self, live: LiveEdit) -> None:
+        from watchfiles import awatch
+
+        done = edit.exit_file(live.copy)
+        try:
+            async for changes in awatch(live.folder, stop_event=live.stop, debounce=50, step=50):
+                names = {Path(path).name for _change, path in changes}
+                if done.name in names or done.exists():
+                    await self._finish_live(live)
+                    return
+                if live.copy.name in names:
+                    await self._live_redraw(live)
+        except Exception:
+            await self._finish_live(live, closed=True)
+
+    async def _live_redraw(self, live: LiveEdit) -> None:
+        try:
+            text = live.copy.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return
+        if self._live is not live or text == (self.preview_text or live.base):
+            return
+        self.preview_text = text
+        async with self._render_lock:
+            await self._render_text(clean(text), diagram=live.item.is_diagram, draw=live.item.draw or self._shown_drawn, plain=False)
+
+    def _check_live_pane(self) -> None:
+        live = self._live
+        if live is None:
+            return
+
+        def check() -> None:
+            if not self._pane_alive(live.pane_id) and not edit.exit_file(live.copy).exists():
+                self.call_from_thread(self._close_live_by_hand, live)
+
+        self.run_worker(check, thread=True, group="live-check", exclusive=True, exit_on_error=False)
+
+    async def _close_live_by_hand(self, live: LiveEdit) -> None:
+        await self._finish_live(live, closed=True)
+
+    async def _finish_live(self, live: LiveEdit, closed: bool = False) -> None:
+        if self._live is not live:
+            return
+        self._live = None
+        live.stop.set()
+        if getattr(self, "_live_timer", None) is not None:
+            self._live_timer.stop()
+        try:
+            code = None if closed else int(edit.exit_file(live.copy).read_text(encoding="utf-8").strip() or 1)
+        except (OSError, ValueError):
+            code = 1
+        try:
+            stat = live.copy.stat()
+            saved = (stat.st_mtime_ns, stat.st_size) != live.before
+            edited = live.copy.read_text(encoding="utf-8", errors="replace", newline="")
+        except OSError:
+            saved, edited = False, live.base
+        shutil.rmtree(live.folder, ignore_errors=True)
+        held, self._held = self._held, None
+        sent = False
+        if closed:
+            if saved and not edit.same_text(edited, live.base):
+                self._kept[doc_key(live.item)] = KeptEdit(live.item, live.base, live.base_bytes, edited)
+                self._show_notice("The editor closed. Your saved changes are kept; press e to send them")
+            else:
+                self._show_notice("The editor closed")
+        elif code == 127:
+            self._show_notice("Could not run the editor")
+        elif code != 0:
+            self._show_notice("Edit cancelled")
+        else:
+            sent = self._after_edit(live.item, live.kept, live.base, live.base_bytes, saved, edited)
+        if sent and self.preview_text != edited:
+            # Saved and quit faster than a redraw: show what was sent.
+            self.preview_text = edited
+            async with self._render_lock:
+                await self._render_text(clean(edited), diagram=live.item.is_diagram, draw=live.item.draw or self._shown_drawn, plain=False)
+        if not sent:
+            # Back to the original, or the newest send that waited; keep the message.
+            notice, ok = self.notice, self.notice_ok
+            self.preview_text = None
+            async with self._render_lock:
+                await self._open_locked(held or live.item)
+            self._show_notice(notice, ok) if notice else None
+        self.refresh_bindings()
 
     def _edit_base(self, item: Item) -> tuple[str, bytes | None]:
         if item.kind != "file":
@@ -927,6 +1093,9 @@ class BlueprintApp(App[None]):
 
     def on_unmount(self) -> None:
         self._closing = True
+        if self._live is not None:
+            self._live.stop.set()
+            shutil.rmtree(self._live.folder, ignore_errors=True)
         if self._attachments is not None:
             shutil.rmtree(self._attachments, ignore_errors=True)
 

@@ -196,3 +196,34 @@ def agent_name(kind: str, pane_id: str) -> str:
     pane = re.sub(r"[^a-z0-9]+", "-", pane_id.lower()).strip("-")
     return f"bp-{kind}-{pane}"[:32].rstrip("-")
 
+
+
+# The editor pane: Blueprint opens it with the copy and the editor command in
+# these variables; the pane runs the editor and leaves the exit code next to the
+# copy, then closes.
+SESSION_COPY = "BLUEPRINT_EDIT_COPY"
+SESSION_COMMAND = "BLUEPRINT_EDIT_COMMAND"
+EXIT_SUFFIX = ".exit"
+
+
+def exit_file(copy: Path) -> Path:
+    return copy.with_name(copy.name + EXIT_SUFFIX)
+
+
+def run_session(environ: Mapping[str, str], run: Callable = None) -> int:
+    """Run the editor on the copy and write its exit code next to it."""
+    import json
+    import subprocess
+
+    run = run or subprocess.run
+    copy = Path(environ[SESSION_COPY])
+    command = json.loads(environ[SESSION_COMMAND])
+    try:
+        code = run([*command, str(copy)]).returncode
+    except OSError:
+        code = 127
+    done = exit_file(copy)
+    tmp = done.with_name(done.name + ".tmp")
+    tmp.write_text(str(code), encoding="utf-8")
+    os.replace(tmp, done)
+    return 0
