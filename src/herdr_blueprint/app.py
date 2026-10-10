@@ -341,10 +341,11 @@ class BlueprintApp(App[None]):
         self.refresh_bindings()
         async with self._render_lock:
             # Only the start screen shows the neighbor; never replace a send.
-            if self.current is None and self.query(StartView):
-                body = self.query_one("#body", VerticalScroll)
-                await body.remove_children()
-                await body.mount(StartView(fresh))
+            old = self.query(StartView)
+            if self.current is None and old:
+                # Mount the new one first, so there is never a blank moment.
+                await self.query_one("#body", VerticalScroll).mount(StartView(fresh))
+                await old.remove()
 
     def action_open_file(self) -> None:
         """Pick a doc or diagram from the folder of the pane next to Blueprint."""

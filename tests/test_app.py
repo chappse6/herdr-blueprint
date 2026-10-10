@@ -586,7 +586,8 @@ def start_app(source=None, asker=None, finder=None, refresher=None) -> Blueprint
 
 
 def start_text(app) -> str:
-    return "\n".join(str(static.content) for static in app.query_one(StartView).query(Static))
+    views = app.query(StartView)
+    return "\n".join(str(static.content) for static in views.last().query(Static)) if views else ""
 
 
 def header_text(app) -> str:
