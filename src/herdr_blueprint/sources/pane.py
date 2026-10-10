@@ -37,11 +37,11 @@ class Source:
     cwd: Path | None = None
 
 
-def _herdr(herdr: str, args: list[str], run) -> tuple[dict | None, str | None]:
+def _herdr(herdr: str, args: list[str], run, timeout: float = TIMEOUT) -> tuple[dict | None, str | None]:
     """(result, None) on success, (None, error code) on failure."""
     try:
         # herdr prints UTF-8; Windows would otherwise decode with the ANSI code page.
-        done = run([herdr, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=TIMEOUT)
+        done = run([herdr, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return None, None
     try:
@@ -90,17 +90,64 @@ def source_of(herdr: str, pane_id: str | None, run=subprocess.run) -> Source | N
     )
 
 
-def ask_to_draw(herdr: str, source: Source, run=subprocess.run) -> tuple[bool, str]:
-    """Submit the draw request to the agent: (sent, a line for the header)."""
+def send_prompt(herdr: str, source: Source, text: str, run=subprocess.run) -> tuple[bool, str]:
+    """Submit `text` to the agent: (sent, a line for the header)."""
     agent = source.agent or "the agent"
-    result, code = _herdr(herdr, ["agent", "prompt", source.pane_id, ASK_PROMPT], run)
+    result, code = _herdr(herdr, ["agent", "prompt", source.pane_id, text], run)
     if result is not None:
-        return True, f"Asked {agent} to draw"
+        return True, f"Sent to {agent}"
     if code == "agent_blocked":
         return False, f"{agent} is waiting for your answer"
     if code == "agent_not_found":
         return False, f"{agent} is not in that pane anymore"
     return False, f"Could not reach {agent}"
+
+
+def ask_to_draw(herdr: str, source: Source, run=subprocess.run) -> tuple[bool, str]:
+    """Submit the draw request to the agent: (sent, a line for the header)."""
+    sent, message = send_prompt(herdr, source, ASK_PROMPT, run=run)
+    return (True, f"Asked {source.agent or 'the agent'} to draw") if sent else (False, message)
+
+
+# Programs that are a shell waiting at its prompt when alone in the foreground.
+SHELLS = {"bash", "zsh", "fish", "sh", "dash", "ksh", "tcsh", "pwsh", "powershell", "cmd", "nu", "elvish", "xonsh"}
+
+# herdr waits up to 30 s for the agent; give it a little longer before giving up.
+START_TIMEOUT = 40
+
+
+def shell_is_idle(herdr: str, pane_id: str, run=subprocess.run) -> bool:
+    """True when the pane is a shell at its prompt, where an agent can be started."""
+    result, _code = _herdr(herdr, ["pane", "process-info", "--pane", pane_id], run)
+    info = result.get("process_info") if result else None
+    if not isinstance(info, dict):
+        return False
+    processes = info.get("foreground_processes")
+    if not isinstance(processes, list) or len(processes) != 1 or not isinstance(processes[0], dict):
+        return False
+    # The shell itself must own the foreground, not a job it started.
+    if info.get("shell_pid") != info.get("foreground_process_group_id"):
+        return False
+    name = Path(str(processes[0].get("name") or processes[0].get("argv0") or "")).name.lower().lstrip("-")
+    return name.removesuffix(".exe") in SHELLS
+
+
+def start_agent(herdr: str, source: Source, kind: str, run=subprocess.run) -> tuple[bool, str]:
+    """Start `kind` in the neighbor pane, which must be an idle shell: (started, message)."""
+    from ..edit import agent_name
+
+    result, code = _herdr(
+        herdr,
+        ["agent", "start", agent_name(kind, source.pane_id), "--kind", kind,
+         "--pane", source.pane_id, "--timeout", "30000"],
+        run,
+        timeout=START_TIMEOUT,
+    )
+    if result is not None:
+        return True, f"Started {kind}"
+    if code == "agent_not_ready":
+        return False, f"{kind} started but is waiting for input in that pane"
+    return False, f"Could not start {kind}: {str(code or 'no answer from herdr').replace('_', ' ')}"
 
 
 def _git_files(folder: Path, run) -> list[Path] | None:

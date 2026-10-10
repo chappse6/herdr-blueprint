@@ -77,11 +77,21 @@ description = "open Blueprint"
 | `h` `j` `k` `l` | Move left, down, up, right |
 | `g` `G` | Top, bottom |
 | `ctrl+d` `ctrl+u` | Half a page down, up |
+| `e` | Edit in your editor; save and quit sends the change to the agent |
 | `a` | Ask the agent next to Blueprint to draw its task |
 | `o` | Open a Markdown or Mermaid file from that pane's folder |
 | `t` | Change theme |
 | `r` | Reload |
 | `q` | Quit |
+
+## Edit and hand it back
+
+Press `e` to open what Blueprint shows in your editor (`$VISUAL`, `$EDITOR`,
+then vim). Save and quit (`:wq`) and the change goes to the agent next to
+Blueprint as a diff, or as the new version of something it sent. Quit without
+saving (`:q!`) and nothing happens. Blueprint never writes the file itself: the
+agent applies the change, and you roll it back the way you roll back any agent
+change. With no agent there but a shell, Blueprint offers to start one.
 
 ## Send things from an agent
 

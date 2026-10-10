@@ -179,3 +179,34 @@ FilePicker {
     color: $text-muted;
     padding-top: 1;
 }
+
+AgentPicker {
+    align: center middle;
+    background: $background 40%;
+}
+
+#agents {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    border: round $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#agents-title {
+    color: $accent;
+    text-style: bold;
+    padding-bottom: 1;
+}
+
+#agents OptionList {
+    height: auto;
+    border: none;
+    background: $surface;
+}
+
+#agents-hint {
+    color: $text-muted;
+    padding-top: 1;
+}

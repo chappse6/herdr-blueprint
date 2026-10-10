@@ -193,3 +193,70 @@ def test_an_agent_title_that_is_just_the_product_name_is_not_a_task():
     for title in ("Claude Code", "claude", "Codex", "OpenAI Codex"):
         run = completed(pane_json(agent="claude", cwd="/w", terminal_title_stripped=title))
         assert pane.source_of("herdr", "w1:p1", run=run).task is None, title
+
+
+# --- sending any prompt, and starting an agent -------------------------------------------
+
+def test_send_prompt_submits_the_text():
+    seen = {}
+
+    def run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return completed("{}")(cmd)
+
+    assert pane.send_prompt("herdr", pane.Source("w1:p1", agent="claude"), "hello", run=run) == (True, "Sent to claude")
+    assert seen["cmd"] == ["herdr", "agent", "prompt", "w1:p1", "hello"]
+
+
+def process_info(names, shell_pid=10, group=10):
+    procs = [{"name": n, "argv0": n, "pid": 10 + i} for i, n in enumerate(names)]
+    return json.dumps({"result": {"process_info": {
+        "foreground_processes": procs, "shell_pid": shell_pid, "foreground_process_group_id": group,
+    }}})
+
+
+def test_an_idle_shell_is_a_place_to_start_an_agent():
+    seen = {}
+
+    def run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return completed(process_info(["zsh"]))(cmd)
+
+    assert pane.shell_is_idle("herdr", "w1:p1", run=run)
+    assert seen["cmd"] == ["herdr", "pane", "process-info", "--pane", "w1:p1"]
+    assert pane.shell_is_idle("herdr", "w1:p1", run=completed(process_info(["-zsh"])))
+    assert pane.shell_is_idle("herdr", "w1:p1", run=completed(process_info(["pwsh.exe"])))
+
+
+def test_a_busy_pane_is_not():
+    assert not pane.shell_is_idle("herdr", "w1:p1", run=completed(process_info(["nvim"])))
+    assert not pane.shell_is_idle("herdr", "w1:p1", run=completed(process_info(["zsh", "sleep"])))
+    # The shell is not in the foreground: something it started is.
+    assert not pane.shell_is_idle("herdr", "w1:p1", run=completed(process_info(["zsh"], shell_pid=10, group=99)))
+    assert not pane.shell_is_idle("herdr", "w1:p1", run=completed(error_json("pane_not_found"), 1))
+
+
+def test_start_agent_uses_a_valid_unique_name_and_waits():
+    seen = {}
+
+    def run(cmd, **kwargs):
+        seen.update(kwargs, cmd=cmd)
+        return completed("{}")(cmd)
+
+    ok, _ = pane.start_agent("herdr", pane.Source("w1:p1"), "claude", run=run)
+    assert ok
+    assert seen["cmd"][:3] == ["herdr", "agent", "start"]
+    assert seen["cmd"][3] == "bp-claude-w1-p1"
+    assert seen["cmd"][seen["cmd"].index("--kind") + 1] == "claude"
+    assert seen["cmd"][seen["cmd"].index("--pane") + 1] == "w1:p1"
+    assert seen["timeout"] > 30  # longer than herdr's own wait
+
+
+def test_start_agent_explains_failures():
+    source = pane.Source("w1:p1")
+    assert pane.start_agent("herdr", source, "claude", run=completed(error_json("agent_not_ready"), 1)) == (
+        False, "claude started but is waiting for input in that pane",
+    )
+    assert pane.start_agent("herdr", source, "claude", run=completed(error_json("pane_busy"), 1)) == (
+        False, "Could not start claude: pane busy",
+    )
