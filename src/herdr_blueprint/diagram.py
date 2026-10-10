@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 
 from rich.cells import cell_len
@@ -61,12 +62,22 @@ def _char_pairs(canvas: Canvas) -> list[list[tuple[str, str]]]:
 Canvas.to_styled_pairs = _char_pairs
 
 
+@dataclass(frozen=True)
+class Drawing:
+    """A drawn diagram and the layout (padding_x, padding_y, gap) it was drawn with."""
+
+    text: Text
+    padding: tuple[int, int, int]
+
+
 @lru_cache(maxsize=64)
-def _render(source: str, theme_name: str, max_width: int | None) -> Text:
+def _render(source: str, theme_name: str, max_width: int | None) -> Drawing:
     # Cached because a diagram is redrawn on mount, theme change and resize.
     # Callers must not modify the returned Text.
     text = Text()
-    for padding_x, padding_y, gap in _LAYOUTS:
+    layout = _LAYOUTS[0]
+    for layout in _LAYOUTS:
+        padding_x, padding_y, gap = layout
         try:
             text = render_rich(
                 source,
@@ -81,11 +92,16 @@ def _render(source: str, theme_name: str, max_width: int | None) -> Text:
             break
     if not text.plain.strip():
         raise DiagramError("termaid returned no output")
-    return text
+    return Drawing(text, layout)
 
 
 def render_diagram(source: str, palette: Palette, max_width: int | None = None) -> Text:
     """Draw Mermaid source as styled text that fits `max_width` when possible."""
+    return draw_diagram(source, palette, max_width).text
+
+
+def draw_diagram(source: str, palette: Palette, max_width: int | None = None) -> Drawing:
+    """Like render_diagram, and say which layout won (point mode needs it)."""
     if len(source) > MAX_DIAGRAM_CHARS:
         raise DiagramError(
             f"This diagram is too large to draw ({len(source):,} characters, "

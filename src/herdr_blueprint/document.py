@@ -17,7 +17,7 @@ from textual.widgets import Log, Markdown, Static
 from textual.widgets.markdown import MarkdownFence
 from textual.worker import get_current_worker
 
-from .diagram import DiagramError, render_diagram
+from .diagram import DiagramError, Drawing, draw_diagram, render_diagram
 from .themes import palette_for_theme
 
 PLACEHOLDER = "Drawing diagram…"
@@ -122,6 +122,8 @@ class DiagramView(Static):
         super().__init__(PLACEHOLDER, markup=False, **kwargs)
         self.source = source
         self._requested: tuple[str, int | None] | None = None
+        # The last drawing shown, with its layout; None until drawn (or if it failed).
+        self.drawing: Drawing | None = None
 
     def on_mount(self) -> None:
         self.watch(self.app, "theme", self._redraw, init=True)
@@ -137,6 +139,14 @@ class DiagramView(Static):
         self.run_worker(partial(self._draw, width), thread=True, exclusive=True, group="draw")
 
     def _draw(self, width: int | None) -> None:
-        content = draw(self.app, self.source, width)
+        try:
+            drawing: Drawing | None = draw_diagram(self.source, palette_for_theme(self.app.theme), width)
+            content = Content.from_rich_text(drawing.text)
+        except DiagramError:
+            drawing, content = None, draw(self.app, self.source, width)
         if not get_current_worker().is_cancelled:
-            self.app.call_from_thread(self.update, content)
+            self.app.call_from_thread(self._show, drawing, content)
+
+    def _show(self, drawing: Drawing | None, content: Content) -> None:
+        self.drawing = drawing
+        self.update(content)

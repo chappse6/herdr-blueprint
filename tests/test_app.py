@@ -792,3 +792,13 @@ async def test_a_rereads_and_says_when_the_agent_left(tmp_path):
         await wait_for(pilot, lambda: app.notice == "claude is not in that pane anymore")
         assert asked == []
         assert not app.check_action("ask", ())
+
+
+async def test_a_drawn_diagram_keeps_its_drawing():
+    app = make_app()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="mermaid", title="Flow", source="graph LR\n  A --> B", draw=True))
+        view = app.query_one(DiagramView)
+        await wait_for(pilot, lambda: view.drawing is not None)
+        assert view.drawing.padding == (4, 2, 4)

@@ -70,3 +70,18 @@ def test_wide_characters_in_flowcharts_keep_their_styles():
         for i in range(span.start, span.end):
             styled[i] = True
     assert "".join(ch for ch, has in zip(plain, styled) if ch.strip() and not has) == ""
+
+
+# --- which layout a drawing used --------------------------------------------------------
+
+def test_a_drawing_says_which_layout_it_used():
+    from herdr_blueprint.diagram import Drawing, draw_diagram
+
+    palette = get_palette("rose-pine")
+    roomy = draw_diagram("graph LR\n  A --> B", palette, 200)
+    assert isinstance(roomy, Drawing) and roomy.padding == (4, 2, 4)
+    wide = "graph LR\n" + "\n".join(f"  N{i}[Node number {i}] --> N{i + 1}[Node number {i + 1}]" for i in range(6))
+    tight = draw_diagram(wide, palette, 60)
+    assert tight.padding != (4, 2, 4)
+    assert width_of(tight.text) <= 60 or tight.padding == (1, 0, 2)
+    assert render_diagram(wide, palette, 60).plain == tight.text.plain
