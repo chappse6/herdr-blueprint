@@ -55,7 +55,7 @@ Add `--draw` to draw Mermaid. Without it, diagrams stay as text.
 | `h` `j` `k` `l` | Move left, down, up, right |
 | `g` `G` | Top, bottom |
 | `ctrl+d` `ctrl+u` | Half a page down, up |
-| `e` | Edit and send to the agent |
+| `e` | Point at a part and ask |
 | `t` | Change theme |
 | `r` | Reload |
 | `q` | Quit |

@@ -52,6 +52,14 @@ Empty `$root` means the plugin is not installed: tell the user to run
   then shows as code, which is faster.
 - The flag belongs to each send or refresh.
 
+## When the user pointed at something in Blueprint
+
+The prompt starts with "In Blueprint I pointed at ..." and names the part (a
+box, participant, message, heading, table...), where it is (file and line, or
+the source of something you sent) and what the user wants. Change that part
+and anything it describes, then show the result in Blueprint again: `show` the
+file, or `send` the new version, with `--draw` when the point is the picture.
+
 ## When the user edited something in Blueprint
 
 The prompt starts with "I edited ... in Blueprint" and holds a diff (for a

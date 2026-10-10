@@ -77,25 +77,32 @@ description = "open Blueprint"
 | `h` `j` `k` `l` | Move left, down, up, right |
 | `g` `G` | Top, bottom |
 | `ctrl+d` `ctrl+u` | Half a page down, up |
-| `e` | Edit in your editor; save and quit sends the change to the agent |
+| `e` | Point at a part to ask about it (then `e` again edits the text) |
 | `a` | Ask the agent next to Blueprint to draw its task |
 | `o` | Open a Markdown or Mermaid file from that pane's folder |
 | `t` | Change theme |
 | `r` | Reload |
 | `q` | Quit |
 
-## Edit and hand it back
+## Point and ask
 
-Press `e` to open what Blueprint shows in your editor (`$VISUAL`, `$EDITOR`,
-else vim, vi or nano). Save and quit (`:wq`) and the change goes to the agent
-next to Blueprint as a diff, or as the new version of something it sent. Quit
-without saving (`:q!`) and nothing happens. Blueprint never writes the file
-itself: the agent applies the change, and you roll it back the way you roll
-back any agent change.
+Press `e` and the first part of what Blueprint shows is selected: a box in a
+flowchart or state diagram, a participant or message in a sequence diagram, a
+heading, paragraph, list or table in a document (other diagrams as a whole).
+Move with `h` `j` `k` `l` or click a part. Press Enter, say what should change,
+and press Enter again: the agent next to Blueprint gets the part, where it is in
+the source and your note, changes it, and sends the result back. Esc steps back.
 
-With no agent there but a shell, Blueprint offers to start one. An edit that
-could not be sent is kept: press `e` on that document to pick it up again, or
-save it empty to throw it away.
+To change the text yourself, press `e` again while pointing. Your editor
+(`$VISUAL`, `$EDITOR`, else vim, vi or nano) opens on that line, in a pane below
+Blueprint inside herdr, and every save redraws the drawing above. Save and quit
+(`:wq`) and the change goes to the agent as a diff; quit without saving (`:q!`)
+and nothing happens. Blueprint never writes the file itself: the agent applies
+the change, and you roll it back the way you roll back any agent change.
+
+With no agent there but a shell, Blueprint offers to start one. A note or an
+edit that could not be sent is kept for that document: point again (or press
+`e` twice) to pick it up, or save an edit empty to throw it away.
 
 ## Send things from an agent
 
