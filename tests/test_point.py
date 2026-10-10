@@ -4,6 +4,7 @@ import pytest
 from rich.cells import cell_len
 from rich.console import Console
 from rich.style import Style
+from rich.text import Text
 from termaid import render_rich
 
 import herdr_blueprint.diagram  # noqa: F401  (themes and the wide-character fix, as in the app)
@@ -225,3 +226,22 @@ async def test_document_part_descriptions():
     assert described[3] == 'the table under "Steps"'
     assert described[6] == "the diagram block under \"Steps\""
     assert described[8] == "the horizontal rule"
+
+
+def test_parts_off_the_drawing_by_one_cell_are_refused():
+    # A termaid layout change must fail loudly, not be nudged into place.
+    text = draw(FLOW)
+    shifted = Text("\n".join(" " + row for row in text.plain.split("\n")))
+    assert point.diagram_parts(FLOW, (4, 2, 4), text) and point.diagram_parts(FLOW, (4, 2, 4), shifted) == []
+
+
+def test_an_empty_graph_has_no_parts():
+    assert point.diagram_parts("graph LR\n", (4, 2, 4), draw("graph LR\n")) == []
+
+
+def test_a_graph_termaid_cannot_split_has_no_parts(monkeypatch):
+    def unparseable(source):
+        raise ValueError("unexpected token")
+
+    monkeypatch.setattr("termaid.parser.flowchart.parse_flowchart", unparseable)
+    assert point.diagram_parts(FLOW, (4, 2, 4), draw(FLOW)) == []

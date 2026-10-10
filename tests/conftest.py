@@ -9,4 +9,6 @@ def isolated_dirs(tmp_path, monkeypatch):
     monkeypatch.setenv("HERDR_WORKSPACE_ID", "test")
     # Tests decide whether they run inside a herdr session.
     monkeypatch.delenv("HERDR_SOCKET_PATH", raising=False)
+    # Without its own pane id, Blueprint never opens an editor pane in a real session.
+    monkeypatch.delenv("HERDR_PANE_ID", raising=False)
     return tmp_path

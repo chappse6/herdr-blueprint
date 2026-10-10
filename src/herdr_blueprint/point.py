@@ -199,29 +199,18 @@ def _char_at(rows: list[str], x: int, y: int) -> str:
 
 
 def _aligned(parts: list[Part], text: Text) -> list[Part]:
-    """`parts` moved onto the drawing (by at most a few cells), or [] if they don't fit it."""
+    """`parts`, or [] if their boxes don't sit on the drawing's corners.
+
+    No nudging: a termaid layout change must show up as no parts (and failing
+    tests), not as boxes moved onto whatever is nearby.
+    """
     rows = text.plain.split("\n")
     boxed = [box for part in parts if part.kind in ("node", "participant") for box in part.boxes]
-    if not boxed:
-        return parts
-
-    def fits(dx: int, dy: int) -> bool:
-        return all(
-            _char_at(rows, b.x + dx, b.y + dy) != " "
-            and _char_at(rows, b.x + b.width - 1 + dx, b.y + b.height - 1 + dy) != " "
-            for b in boxed
-        )
-
-    shifts = sorted(((dx, dy) for dx in range(-8, 9) for dy in range(-6, 7)), key=lambda s: abs(s[0]) + abs(s[1]))
-    for dx, dy in shifts:
-        if fits(dx, dy):
-            if (dx, dy) == (0, 0):
-                return parts
-            return [
-                replace(part, boxes=tuple(replace(b, x=b.x + dx, y=b.y + dy) for b in part.boxes))
-                for part in parts
-            ]
-    return []
+    fits = all(
+        _char_at(rows, b.x, b.y) != " " and _char_at(rows, b.x + b.width - 1, b.y + b.height - 1) != " "
+        for b in boxed
+    )
+    return parts if fits else []
 
 
 # --- documents ------------------------------------------------------------------------

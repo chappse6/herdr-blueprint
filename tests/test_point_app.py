@@ -135,7 +135,26 @@ async def test_moving_to_a_part_off_screen_scrolls_it_into_view(tmp_path):
             await pilot.press("l")
         await pilot.pause()
         assert app.selected == 5
+        box, view = app.parts[5].boxes[0], app.query_one(DiagramView)
+        left = view.virtual_region.x + box.x
+        assert body.scroll_x <= left and left + box.width <= body.scroll_x + body.scrollable_content_region.width
+
+
+async def test_a_click_after_scrolling_selects_the_node_under_it(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(60, 30)) as pilot:
+        await pilot.pause()
+        view = await open_drawn(app, pilot, flow_file(tmp_path, WIDE))
+        body = app.query_one("#body")
+        for _ in range(12):
+            await pilot.press("l")  # scroll sideways while reading
+        await pilot.pause()
         assert body.scroll_x > 0
+        parts = point.diagram_parts(WIDE, view.drawing.padding, view.drawing.text)
+        target = next(i for i, p in enumerate(parts) if body.scroll_x <= p.boxes[0].x)
+        box, region = parts[target].boxes[0], view.content_region  # on screen, after the scroll
+        await pilot.click(offset=(region.x + box.x + 1, region.y + box.y + 1))
+        assert app.pointing and app.selected == target
 
 
 async def test_a_diagram_without_parts_is_pointed_at_whole(tmp_path):
@@ -182,6 +201,7 @@ async def test_enter_asks_with_the_part_its_line_and_the_file(tmp_path):
         assert "line 2" in text and "cache it for 30 seconds" in text
         assert not app.pointing and not app.query(NoteLine)
         await wait_for(pilot, lambda: app.notice == 'Asked claude about the box "Tollgate"')
+        assert app._kept == {}  # delivered: the next Enter starts empty
 
 
 async def test_escape_steps_back_from_the_note_then_leaves(tmp_path):
@@ -257,7 +277,78 @@ async def test_pointing_is_locked_while_asking(tmp_path):
         await wait_for(pilot, lambda: app.check_action("edit", ()))
 
 
+async def test_a_failed_note_on_sent_text_that_was_replaced_is_dropped(tmp_path):
+    release = threading.Event()
+
+    def slow_fail(source, text):
+        release.wait(5)
+        return False, "Could not reach claude"
+
+    app = make_app(tmp_path, prompter=slow_fail)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(0.3)
+        await app.open_item(Item(kind="mermaid", title="Login", source=FLOW, draw=True))
+        await wait_for(pilot, lambda: app.query_one(DiagramView).drawing is not None)
+        await pilot.press("e", "l", "enter", *"rename it", "enter")
+        await wait_for(pilot, lambda: app._sending)
+        inbox.send({"kind": "text", "source": "# Other", "title": "Other"})
+        await wait_for(pilot, lambda: app.current.title == "Other")
+        release.set()
+        await wait_for(pilot, lambda: not app._sending)
+        assert app.notice == "Could not reach claude. Your note on 'Login' was not sent and was dropped"
+        assert app._kept == {}
+
+
+async def test_a_failed_note_on_a_file_no_longer_shown_says_where_to_find_it(tmp_path):
+    release = threading.Event()
+
+    def slow_fail(source, text):
+        release.wait(5)
+        return False, "Could not reach claude"
+
+    other = tmp_path / "other.md"
+    other.write_text("# Other\n", encoding="utf-8")
+    app = make_app(tmp_path, prompter=slow_fail)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await open_drawn(app, pilot, flow_file(tmp_path))
+        await pilot.press("e", "l", "enter", *"rename it", "enter")
+        await wait_for(pilot, lambda: app._sending)
+        await app.open_item(Item(kind="file", title="other.md", path=other))
+        release.set()
+        await wait_for(pilot, lambda: not app._sending)
+        assert app.notice == "Could not reach claude. Your note was kept; open flow.mmd again, point at it and press Enter"
+        assert len(app._kept) == 1
+
+
+async def test_ctrl_q_quits_while_pointing(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await open_drawn(app, pilot, flow_file(tmp_path))
+        await pilot.press("e", "q")
+        assert app.pointing and app.is_running  # q is not a point-mode key
+        await pilot.press("ctrl+q")
+        await pilot.pause(0.3)
+        assert not app.is_running
+
+
 # --- editing the text from a part ----------------------------------------------------------
+
+async def test_e_on_a_document_with_nothing_to_point_at_edits_it(tmp_path):
+    for name, body in [("empty.md", ""), ("comment.md", "<!-- todo -->\n")]:
+        editor = FakeEditor()
+        path = tmp_path / name
+        path.write_text(body, encoding="utf-8")
+        app = make_app(tmp_path, editor=editor)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await app.open_item(Item(kind="file", title=name, path=path))
+            assert app.check_action("edit", ())
+            await pilot.press("e")
+            await wait_for(pilot, lambda: editor.seen)
+            assert not app.pointing and editor.seen[0][-1].endswith(name)
+
 
 async def test_e_while_pointing_opens_the_editor_on_the_parts_line(tmp_path):
     editor = FakeEditor()
