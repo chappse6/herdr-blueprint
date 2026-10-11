@@ -49,7 +49,8 @@ def test_unknown_kind_is_skipped():
     assert inbox.receive(path) is None
 
 
-def test_workspace_id_is_made_safe_for_folders():
+def test_workspace_id_is_made_safe_for_folders(monkeypatch):
+    monkeypatch.delenv("HERDR_SOCKET_PATH")  # outside herdr: no session prefix
     assert inbox.inbox_dir("w1:p2").name == "w1_p2"
 
 
@@ -138,5 +139,6 @@ def test_each_herdr_session_has_its_own_inbox(monkeypatch):
     assert demo.parent == main.parent
 
 
-def test_outside_herdr_the_inbox_is_named_after_the_workspace():
+def test_outside_herdr_the_inbox_is_named_after_the_workspace(monkeypatch):
+    monkeypatch.delenv("HERDR_SOCKET_PATH")
     assert inbox.inbox_dir("w1").name == "w1"

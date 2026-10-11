@@ -23,7 +23,7 @@ def test_install_links_into_both_agents(tmp_path):
     for dest in [home / ".claude/skills/blueprint", home / ".agents/skills/blueprint"]:
         assert dest.is_symlink()
         assert dest.resolve() == skill.resolve()
-    assert len(lines) == 2
+    assert len([line for line in lines if not line.startswith("command")]) == 2
 
 
 def test_install_skips_agents_that_are_not_installed(tmp_path):
@@ -37,8 +37,8 @@ def test_install_skips_agents_that_are_not_installed(tmp_path):
 def test_install_twice_is_harmless(tmp_path):
     skill, home = make_skill(tmp_path), make_home(tmp_path)
     skills_install.install(skill, home)
-    lines = skills_install.install(skill, home)
-    assert all(line.startswith("already linked") for line in lines)
+    lines = [line for line in skills_install.install(skill, home) if not line.startswith("command")]
+    assert lines and all(line.startswith("already linked") for line in lines)
 
 
 def test_install_leaves_a_foreign_folder_alone(tmp_path):
@@ -99,3 +99,29 @@ def test_skill_dir_falls_back_to_the_current_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(skills_install, "__file__", str(tmp_path / "venv/lib/site-packages/herdr_blueprint/skills_install.py"))
     monkeypatch.chdir(tmp_path / "plugin")
     assert skills_install.skill_dir() == skill
+
+
+def test_install_puts_a_short_command_on_the_path(tmp_path):
+    import os
+
+    skill, home = make_skill(tmp_path), make_home(tmp_path)
+    lines = skills_install.install(skill, home)
+    command = home / ".local" / "bin" / "herdr-blueprint"
+    if os.name == "nt":
+        assert not command.exists()  # no shell script on Windows; the skill's long form works there
+        return
+    text = command.read_text(encoding="utf-8")
+    assert f'--project "{skill.parent.parent}"' in text and "python -m herdr_blueprint" in text
+    assert os.access(command, os.X_OK) and any(str(command) in line for line in lines)
+    skills_install.uninstall(skill, home)
+    assert not command.exists()
+
+
+def test_install_leaves_someone_elses_command_alone(tmp_path):
+    skill, home = make_skill(tmp_path), make_home(tmp_path)
+    command = home / ".local" / "bin" / "herdr-blueprint"
+    command.parent.mkdir(parents=True)
+    command.write_text("#!/bin/sh\necho mine\n", encoding="utf-8")
+    skills_install.install(skill, home)
+    skills_install.uninstall(skill, home)
+    assert command.read_text(encoding="utf-8") == "#!/bin/sh\necho mine\n"

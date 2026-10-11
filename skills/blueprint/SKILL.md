@@ -11,17 +11,11 @@ drawing ASCII art in chat.
 
 ## Commands
 
-If `HERDR_ENV` is not `1`, skip this skill. Run the `root=` and `blueprint_cli()`
-lines in the same shell command as each call: shell variables don't carry over
-between tool calls.
+If `HERDR_ENV` is not `1`, skip this skill.
 
 ```bash
-root=$(herdr plugin list --plugin seeun.blueprint --json | uv run --no-project --quiet python -c 'import json, sys; p = json.load(sys.stdin)["result"]["plugins"]; print(p[0]["plugin_root"] if p else "")')
-# Not named blueprint: a `blueprint` alias would make this a parse error.
-blueprint_cli() { uv run --project "$root" --no-sync python -m herdr_blueprint "$@"; }
-
 # A diagram you write now: --draw makes Blueprint draw it
-blueprint_cli send --draw --title "Order flow" <<'EOF2'
+herdr-blueprint send --draw --title "Order flow" <<'EOF2'
 sequenceDiagram
   Client->>API: POST /orders
   API->>DB: INSERT order
@@ -29,20 +23,29 @@ sequenceDiagram
 EOF2
 
 # Markdown works too: notes, tables, code, with Mermaid fences drawn by --draw
-blueprint_cli send --title "Plan" <<'EOF2'
+herdr-blueprint send --title "Plan" <<'EOF2'
 # Plan
 - step one
 - step two
 EOF2
 
 # A file (.md, .markdown, .mmd, .mermaid); add --draw if it holds Mermaid to draw
-blueprint_cli show docs/design.md
+herdr-blueprint show docs/design.md
 
 # You changed the file on screen: redraw it in place
-blueprint_cli refresh --draw
+herdr-blueprint refresh --draw
 
 # Is a Blueprint viewer open? Prints open or closed (exit 0 when open)
-blueprint_cli status
+herdr-blueprint status
+```
+
+`herdr-blueprint` is in `~/.local/bin` once the skill is installed. If the shell
+says it is not found, define it from the plugin folder in the same shell
+command as each call (shell functions don't carry over between tool calls):
+
+```bash
+root=$(herdr plugin list --plugin seeun.blueprint --json | uv run --no-project --quiet python -c 'import json, sys; p = json.load(sys.stdin)["result"]["plugins"]; print(p[0]["plugin_root"] if p else "")')
+herdr-blueprint() { uv run --project "$root" --no-sync python -m herdr_blueprint "$@"; }
 ```
 
 Empty `$root` means the plugin is not installed: tell the user to run
@@ -101,7 +104,7 @@ so send Markdown with `--draw`, in the user's language:
 When you finish a unit of work (a feature piece, a fix, a change to the flow)
 and before you report it in chat:
 
-1. Run `blueprint_cli status`. If it prints `closed`, stop here: no drawing.
+1. Run `herdr-blueprint status`. If it prints `closed`, stop here: no drawing.
 2. Send the same note as "what you are working on", updated. Start from your
    last diagram and change only what changed.
 
