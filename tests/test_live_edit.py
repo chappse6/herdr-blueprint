@@ -349,3 +349,44 @@ async def test_a_held_send_that_replaces_sent_text_reports_the_work_dropped(tmp_
         await pilot.pause(0.1)
         assert app._kept == {}
         assert app.notice == "Your unsent work on 'Plan' was dropped"
+
+
+async def test_opening_the_editor_pane_does_not_freeze_blueprint(tmp_path):
+    import threading
+
+    release = threading.Event()
+    fake = FakePane()
+
+    def slow_open(command, copy):
+        release.wait(5)
+        return fake.open(command, copy)
+
+    app = make_app(tmp_path, fake)
+    app._pane_editor = slow_open
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="file", title="flow.md", path=doc(tmp_path)))
+        await pilot.press("e", "e")
+        await wait_for(pilot, lambda: app.notice == "Opening the editor…")
+        assert not app.check_action("edit", ()) and not app.check_action("edit_text", ())
+        release.set()
+        await wait_for(pilot, lambda: app.editing)
+
+
+async def test_reload_and_open_wait_while_editing(tmp_path):
+    fake = FakePane()
+    app = make_app(tmp_path, fake)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await start_editing(app, pilot, doc(tmp_path), fake)
+        assert not app.check_action("reload", ()) and not app.check_action("open_file", ())
+
+
+async def test_quitting_mid_edit_leaves_the_copy_for_the_editor(tmp_path):
+    fake = FakePane()
+    app = make_app(tmp_path, fake)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await start_editing(app, pilot, doc(tmp_path), fake)
+        copy = fake.copy
+    assert copy.exists()  # the editor in its pane can still save

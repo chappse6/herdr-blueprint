@@ -12,3 +12,11 @@ def isolated_dirs(tmp_path, monkeypatch):
     # Without its own pane id, Blueprint never opens an editor pane in a real session.
     monkeypatch.delenv("HERDR_PANE_ID", raising=False)
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def fresh_parts_cache():
+    """Each test works parts out itself (some patch termaid)."""
+    from herdr_blueprint import point
+
+    point._parts_cache_clear()

@@ -36,12 +36,17 @@ def as_code(source: str) -> str:
 
 def draw(app: App, source: str, max_width: int | None = None) -> Content:
     """Mermaid source as themed content, or an error notice followed by the source."""
-    palette = palette_for_theme(app.theme)
     try:
-        return Content.from_rich_text(render_diagram(source, palette, max_width))
+        return Content.from_rich_text(render_diagram(source, palette_for_theme(app.theme), max_width))
     except DiagramError as exc:
-        notice = Text(f"Could not draw this diagram: {exc}\n\n", style=f"bold {palette.error}")
-        return Content.from_rich_text(notice + Text(source, style=palette.muted))
+        return failed(app, source, exc)
+
+
+def failed(app: App, source: str, exc: DiagramError) -> Content:
+    """The error notice and the source, for a diagram termaid could not draw."""
+    palette = palette_for_theme(app.theme)
+    notice = Text(f"Could not draw this diagram: {exc}\n\n", style=f"bold {palette.error}")
+    return Content.from_rich_text(notice + Text(source, style=palette.muted))
 
 
 class DiagramFence(MarkdownFence):
@@ -94,8 +99,8 @@ class DiagramFence(MarkdownFence):
         try:
             drawing: Drawing | None = draw_diagram(self.code, palette_for_theme(self.app.theme), width)
             content = Content.from_rich_text(drawing.text)
-        except DiagramError:
-            drawing, content = None, draw(self.app, self.code, width)
+        except DiagramError as exc:
+            drawing, content = None, failed(self.app, self.code, exc)
         if not get_current_worker().is_cancelled:
             self.app.call_from_thread(self._show, drawing, content)
 
@@ -202,8 +207,8 @@ class DiagramView(Static):
         try:
             drawing: Drawing | None = draw_diagram(self.source, palette_for_theme(self.app.theme), width)
             content = Content.from_rich_text(drawing.text)
-        except DiagramError:
-            drawing, content = None, draw(self.app, self.source, width)
+        except DiagramError as exc:
+            drawing, content = None, failed(self.app, self.source, exc)
         if not get_current_worker().is_cancelled:
             self.app.call_from_thread(self._show, drawing, content)
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
 from rich.cells import cell_len
 from rich.style import Style
@@ -84,8 +85,19 @@ def diagram_parts(source: str, padding: tuple[int, int, int], text: Text) -> lis
     """Nodes, or participants and messages, as drawn in `text` with `padding`.
 
     Empty for other diagrams, for sources termaid can't parse, and when the
-    parts don't line up with the drawing.
+    parts don't line up with the drawing. Worked out once per drawing: a theme
+    change keeps the layout, and pointing in a document asks for every diagram.
     """
+    return list(_cached_parts(source, tuple(padding), text.plain))
+
+
+def _parts_cache_clear() -> None:
+    _cached_parts.cache_clear()
+
+
+@lru_cache(maxsize=32)
+def _cached_parts(source: str, padding: tuple[int, int, int], plain: str) -> tuple[Part, ...]:
+    text = Text(plain)
     stripped = _strip(source)
     kind = _kind(stripped)
     try:
@@ -100,16 +112,16 @@ def diagram_parts(source: str, padding: tuple[int, int, int], text: Text) -> lis
         elif kind == "sequenceDiagram":
             parts = _sequence_parts(stripped, padding, source)
         else:
-            return []
+            return ()
     except Exception:
-        return []  # termaid could draw it, but not split it into parts
+        return ()  # termaid could draw it, but not split it into parts
     links = code_links(source)
 
     def code_of(part: Part) -> str:
         # A branch without its own line stands for the code at its branch point.
         return links.get(part.id) or (links.get(part.id.split("->")[0], "") if part.kind == "branch" else "")
 
-    return [replace(part, code=code_of(part)) if code_of(part) else part for part in _with_labels(_aligned(parts, text), text)]
+    return tuple(replace(part, code=code_of(part)) if code_of(part) else part for part in _with_labels(_aligned(parts, text), text))
 
 
 def whole_diagram(source: str) -> Part:

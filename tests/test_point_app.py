@@ -559,3 +559,52 @@ async def test_e_while_pointing_opens_the_editor_on_the_parts_line(tmp_path):
         command = editor.seen[0]
         assert command[0] == "/usr/bin/nvim" and "+3" in command and command[-1].endswith("flow.mmd")
         assert not app.pointing
+
+
+async def test_a_click_while_the_note_is_open_does_not_move_it(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        view = await open_drawn(app, pilot, flow_file(tmp_path))
+        await pilot.press("e", "enter", *"about Browser")
+        box = app.parts[2].boxes[0]
+        await pilot.click(DiagramView, offset=(box.x + 2, box.y + 1 + 2))
+        assert app.selected == 0 and app.query_one(NoteLine).value == "about Browser"
+
+
+async def test_a_kept_note_stays_with_its_block_when_the_file_changes(tmp_path):
+    path = tmp_path / "notes.md"
+    path.write_text("# Notes\n\nFirst paragraph.\n\nSecond paragraph.\n", encoding="utf-8")
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="file", title="notes.md", path=path))
+        await pilot.press("e", "j", "enter", *"shorter", "escape", "escape")
+        path.write_text("# Notes\n\nNew opening.\n\nFirst paragraph.\n\nSecond paragraph.\n", encoding="utf-8")
+        await pilot.press("r")
+        await pilot.pause(0.2)
+        await pilot.press("e", "j", "enter")  # the same position, now "New opening."
+        assert app.query_one(NoteLine).value == ""
+        await pilot.press("escape", "j", "enter")  # "First paragraph." again
+        assert app.query_one(NoteLine).value == "shorter"
+
+
+async def test_a_diagram_that_cannot_be_drawn_is_tried_once(tmp_path, monkeypatch):
+    from herdr_blueprint import document
+    from herdr_blueprint.diagram import DiagramError
+
+    calls = []
+
+    def failing(*args, **kwargs):
+        calls.append(1)
+        raise DiagramError("unsupported")
+
+    monkeypatch.setattr(document, "draw_diagram", failing)
+    monkeypatch.setattr(document, "render_diagram", failing)
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="file", title="flow.mmd", path=flow_file(tmp_path), draw=True))
+        await wait_for(pilot, lambda: calls)
+        await pilot.pause(0.3)
+        assert len(calls) == 1

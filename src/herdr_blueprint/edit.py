@@ -12,7 +12,10 @@ import os
 import re
 import shlex
 import shutil
-from collections.abc import Callable, Mapping
+import signal
+import threading
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 
 # Longer prompt bodies go into a file the agent reads; the prompt names it.
@@ -275,20 +278,53 @@ def exit_file(copy: Path) -> Path:
     return copy.with_name(copy.name + EXIT_SUFFIX)
 
 
-def run_session(environ: Mapping[str, str], run: Callable = None) -> int:
-    """Run the editor on the copy and write its exit code next to it."""
+_TERMINAL_SIGNALS = [getattr(signal, name) for name in ("SIGINT", "SIGQUIT", "SIGTSTP") if hasattr(signal, name)]
+
+
+@contextmanager
+def signals_ignored() -> Iterator[None]:
+    """Ignore terminal signals while waiting for an editor already started: ctrl+c is
+    the editor's. Start the editor first, or it inherits the ignoring."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = [(sig, signal.signal(sig, signal.SIG_IGN)) for sig in _TERMINAL_SIGNALS]
+    try:
+        yield
+    finally:
+        for sig, handler in previous:
+            signal.signal(sig, handler if handler is not None else signal.SIG_DFL)
+
+
+def run_session(environ: Mapping[str, str], run: Callable | None = None) -> int:
+    """Run the editor on the copy and write its exit code next to it, whatever happens:
+    Blueprint waits for that file."""
     import json
     import subprocess
+    import sys
 
-    run = run or subprocess.run
-    copy = Path(environ[SESSION_COPY])
-    command = json.loads(environ[SESSION_COMMAND])
     try:
-        code = run([*command, str(copy)]).returncode
+        copy = Path(environ[SESSION_COPY])
+        command = [*json.loads(environ[SESSION_COMMAND]), str(copy)]
+    except (KeyError, ValueError, TypeError):
+        print("herdr-blueprint: edit-session runs in the editor pane Blueprint opens", file=sys.stderr)
+        return 2
+    code = 1
+    try:
+        if run is not None:
+            code = run(command).returncode
+        else:
+            process = subprocess.Popen(command)
+            with signals_ignored():
+                code = process.wait()
     except OSError:
         code = 127
-    done = exit_file(copy)
-    tmp = done.with_name(done.name + ".tmp")
-    tmp.write_text(str(code), encoding="utf-8")
-    os.replace(tmp, done)
+    finally:
+        done = exit_file(copy)
+        try:
+            tmp = done.with_name(done.name + ".tmp")
+            tmp.write_text(str(code), encoding="utf-8")
+            os.replace(tmp, done)
+        except OSError:
+            pass  # Blueprint closed and its folder went with it
     return 0

@@ -238,3 +238,28 @@ def test_only_edits_of_a_diagram_tied_to_code_are_work_orders():
     mmd = "graph LR\n  A --> B\n  %% code: A a.py:1\n"
     assert edit.touches_code(mmd, mmd.replace("--> B", "--> C"), diagram=True)
     assert not edit.touches_code("graph LR\n  A --> B\n", "graph LR\n  A --> C\n", diagram=True)
+
+
+def test_the_session_survives_a_missing_setup_or_a_removed_folder(tmp_path):
+    import json
+    import subprocess
+
+    assert edit.run_session({}) == 2  # started by hand: says so, no traceback
+    gone = tmp_path / "closed" / "flow.md"  # Blueprint quit and its folder went away
+    env = {edit.SESSION_COPY: str(gone), edit.SESSION_COMMAND: json.dumps(["nvim"])}
+    assert edit.run_session(env, run=lambda command: subprocess.CompletedProcess(command, 0)) == 0
+
+
+def test_the_session_writes_an_exit_code_even_when_running_the_editor_breaks(tmp_path):
+    import json
+
+    copy = tmp_path / "flow.md"
+    copy.write_text("x", encoding="utf-8")
+
+    def broken(command):
+        raise RuntimeError("boom")
+
+    env = {edit.SESSION_COPY: str(copy), edit.SESSION_COMMAND: json.dumps(["nvim"])}
+    with pytest.raises(RuntimeError):
+        edit.run_session(env, run=broken)
+    assert edit.exit_file(copy).read_text() == "1"

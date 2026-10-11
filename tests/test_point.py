@@ -492,3 +492,14 @@ def test_up_and_down_go_to_the_next_row_when_nothing_is_straight_that_way():
     assert point.nearest(loose, names.index("A"), "down") == names.index("B")
     # Sideways stays strict: nothing on the row, no move.
     assert point.nearest(parts, ids.index("K"), "right") == ids.index("K")
+
+
+def test_parts_are_worked_out_once_per_drawing(monkeypatch):
+    calls = []
+    real = point._graph_parts
+    monkeypatch.setattr(point, "_graph_parts", lambda *a: calls.append(1) or real(*a))
+    point._parts_cache_clear()
+    text = draw(FLOW)
+    first = point.diagram_parts(FLOW, (4, 2, 4), text)
+    again = point.diagram_parts(FLOW, (4, 2, 4), text)  # a theme change: same layout
+    assert first == again and len(calls) == 1

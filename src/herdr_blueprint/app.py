@@ -5,13 +5,10 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-import signal
 import subprocess
 import tempfile
-import threading
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -134,6 +131,7 @@ class KeptNote:
     item: Item
     part_id: str
     text: str
+    label: str = ""  # the part's label then: a note follows its part when blocks move
 
 
 @dataclass
@@ -177,23 +175,6 @@ def doc_key(item: Item) -> tuple:
 
 # Signals the terminal sends to the whole foreground group: while the editor runs
 # they are the editor's (Ctrl+C, Ctrl+\\, Ctrl+Z), not Blueprint's. git does the same.
-_EDITOR_SIGNALS = [getattr(signal, name) for name in ("SIGINT", "SIGQUIT", "SIGTSTP") if hasattr(signal, name)]
-
-
-@contextmanager
-def editor_signals_ignored() -> Iterator[None]:
-    """Ignore terminal signals in Blueprint (only; the editor keeps the defaults)."""
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-    previous = [(sig, signal.signal(sig, signal.SIG_IGN)) for sig in _EDITOR_SIGNALS]
-    try:
-        yield
-    finally:
-        for sig, handler in previous:
-            signal.signal(sig, handler if handler is not None else signal.SIG_DFL)
-
-
 class AgentPicker(ModalScreen[str | None]):
     """No agent next to Blueprint, but a shell: start one to receive the edit?"""
 
@@ -346,9 +327,11 @@ class BlueprintApp(App[None]):
         self._live: LiveEdit | None = None
         self._held: Item | None = None  # the newest send that arrived during a live edit or a note
         self._noting = False  # the note line is open: sends wait for it
+        self._opening = False  # herdr is opening the editor pane: sends and e wait for it
+        self._live_timer = None
         self.preview_text: str | None = None  # what the live preview shows
         # Unsent edits, one per document; the next `e` on that document reopens it.
-        self._kept: dict[tuple, KeptEdit] = {}
+        self._kept: dict[tuple, KeptEdit | KeptNote] = {}
         self._sending = False
         self._closing = False
         # Long prompt bodies for the agent; removed when Blueprint closes.
@@ -418,7 +401,7 @@ class BlueprintApp(App[None]):
 
     async def open_item(self, item: Item) -> None:
         """Replace the screen with `item`. The previous one is dropped."""
-        if self._live is not None:
+        if self._live is not None or self._opening:
             self._held = item  # shown, or dropped, when the editor closes
             return
         if self._noting:
@@ -431,7 +414,7 @@ class BlueprintApp(App[None]):
 
     def _release_held(self) -> None:
         """The note line closed: show the send that waited for it."""
-        if self._held is not None and self._live is None and not self._noting:
+        if self._held is not None and self._live is None and not self._noting and not self._opening:
             item, self._held = self._held, None
             self.run_worker(self.open_item(item), group="open", exit_on_error=False)
 
@@ -554,6 +537,8 @@ class BlueprintApp(App[None]):
         if self.pointing and action in ("ask", "open_file", "pick_theme", "reload", "leave"):
             return False  # point mode offers only its own keys
         # Hidden from the footer and the keys do nothing when there is no pane to use.
+        if self._live is not None and action in ("reload", "open_file"):
+            return False  # the editor is open on what is shown
         if action == "ask":
             return bool(self.source and self.source.agent)
         if action == "open_file":
@@ -625,6 +610,8 @@ class BlueprintApp(App[None]):
         return kept if isinstance(kept, KeptEdit) else None
 
     def _editable(self) -> bool:
+        if self._opening:
+            return False
         if self._live is not None:
             return True  # e focuses the editor pane
         item = self.current
@@ -687,12 +674,16 @@ class BlueprintApp(App[None]):
             self._show_notice("No editor found: set $EDITOR")
             return
         command = [*command, *edit.line_arg(command, line)]
-        if self._start_live(item, kept, base, base_bytes, start, command):
-            return
-        outcome = self._edit_copy(item, start, command)
-        if outcome is None:
-            return
-        self._after_edit(item, kept, base, base_bytes, *outcome)
+        self._start_live(item, kept, base, base_bytes, start, command)
+
+    def _borrow_pane(
+        self, item: Item, kept: KeptEdit | None, base: str, base_bytes: bytes | None, text: str, command: list[str],
+    ) -> None:
+        """No editor pane: hand this pane's terminal to the editor."""
+        outcome = self._edit_copy(item, text, command)
+        if outcome is not None:
+            self._after_edit(item, kept, base, base_bytes, *outcome)
+        self._release_held()
 
     def _after_edit(
         self, item: Item, kept: KeptEdit | None, base: str, base_bytes: bytes | None, saved: bool, edited: str,
@@ -720,8 +711,9 @@ class BlueprintApp(App[None]):
 
     def _start_live(
         self, item: Item, kept: KeptEdit | None, base: str, base_bytes: bytes | None, text: str, command: list[str],
-    ) -> bool:
-        """Open the editor in a pane below, with a live preview. False to borrow this pane instead."""
+    ) -> None:
+        """Open the editor in a pane below, with a live preview; else borrow this pane.
+        herdr can take a moment, so the pane opens in the background."""
         name = edit.copy_name(item.path.name if item.path else item.title, diagram=item.is_diagram)
         try:
             folder = Path(tempfile.mkdtemp(prefix="blueprint-edit-"))
@@ -729,21 +721,42 @@ class BlueprintApp(App[None]):
             copy.write_text(text, encoding="utf-8", newline="")
             stat = copy.stat()
         except OSError:
-            return False
-        try:
-            pane_id = self._pane_editor(command, copy)
-        except Exception:
-            pane_id = None
-        if not pane_id:
+            self._borrow_pane(item, kept, base, base_bytes, text, command)
+            return
+        self._opening = True
+        self.refresh_bindings()
+        self._show_notice("Opening the editor…", ok=True)
+
+        def open_pane() -> None:
+            try:
+                pane_id = self._pane_editor(command, copy)
+            except Exception:
+                pane_id = None
+            try:
+                self.call_from_thread(self._editor_opened, pane_id, item, kept, base, base_bytes, text, command, copy, stat)
+            except RuntimeError:
+                shutil.rmtree(folder, ignore_errors=True)  # Blueprint closed meanwhile
+
+        self.run_worker(open_pane, thread=True, group="editor-pane", exit_on_error=False)
+
+    def _editor_opened(
+        self, pane_id: str | None, item: Item, kept: KeptEdit | None, base: str, base_bytes: bytes | None,
+        text: str, command: list[str], copy: Path, stat,
+    ) -> None:
+        self._opening = False
+        self.refresh_bindings()
+        folder, name = copy.parent, copy.name
+        if not pane_id or self._closing:
             shutil.rmtree(folder, ignore_errors=True)
-            return False
+            if not self._closing:
+                self._borrow_pane(item, kept, base, base_bytes, text, command)
+            return
         live = LiveEdit(item, kept, base, base_bytes, folder, copy, (stat.st_mtime_ns, stat.st_size), pane_id, asyncio.Event())
         self._live = live
         self._show_notice(f"Editing {name}: save to preview, quit to finish", ok=True)
         self.run_worker(self._watch_live(live), group="live", exit_on_error=False)
         self._live_timer = self.set_interval(2, self._check_live_pane)
         self.refresh_bindings()
-        return True
 
     async def _watch_live(self, live: LiveEdit) -> None:
         from watchfiles import awatch
@@ -796,7 +809,7 @@ class BlueprintApp(App[None]):
             return
         self._live = None
         live.stop.set()
-        if getattr(self, "_live_timer", None) is not None:
+        if self._live_timer is not None:
             self._live_timer.stop()
         try:
             code = None if closed else int(edit.exit_file(live.copy).read_text(encoding="utf-8").strip() or 1)
@@ -886,7 +899,7 @@ class BlueprintApp(App[None]):
             except OSError as exc:
                 error = exc
             else:
-                with editor_signals_ignored():
+                with edit.signals_ignored():
                     code = process.wait()
         if error is not None:
             raise error
@@ -1096,16 +1109,42 @@ class BlueprintApp(App[None]):
         key = self._note_key()
         if key is None:
             return
+        label = self.parts[self.selected].label
+        here = self._kept.get(key)
         if text.strip():
-            self._kept[key] = KeptNote(self.current, key[1], text)
-        elif isinstance(self._kept.get(key), KeptNote):
+            self._store_note(key, KeptNote(self.current, key[1], text, label))
+        elif isinstance(here, KeptNote) and here.label in ("", label):
             del self._kept[key]
+
+    def _store_note(self, key: tuple, note: KeptNote) -> None:
+        here = self._kept.get(key)
+        if isinstance(here, KeptNote) and here.label and here.label != note.label:
+            # The part that was here has moved: keep its note for when it is pointed at.
+            self._kept[(key[0], f"{key[1]}@{here.label}")] = here
+        self._kept[key] = note
+
+    def _kept_note(self) -> KeptNote | None:
+        """The note kept for the selected part: under its position, or, if blocks moved,
+        under another position with the same label (moved here)."""
+        key = self._note_key()
+        if key is None:
+            return None
+        label = self.parts[self.selected].label
+        here = self._kept.get(key)
+        if isinstance(here, KeptNote) and here.label in ("", label):
+            return here
+        for other_key, other in list(self._kept.items()):
+            if isinstance(other, KeptNote) and other_key[0] == key[0] and other.label and other.label == label:
+                del self._kept[other_key]
+                self._store_note(key, replace(other, part_id=key[1]))
+                return self._kept[key]
+        return None
 
     def action_point_ask(self) -> None:
         if not self.pointing or self._sending or self.query(NoteLine):
             return
-        kept = self._kept.get(self._note_key())
-        note = NoteLine(kept.text if isinstance(kept, KeptNote) else "")
+        kept = self._kept_note()
+        note = NoteLine(kept.text if kept else "")
         self._noting = True
         self.mount(note, before=self.query_one(Footer))
         note.focus()
@@ -1133,8 +1172,8 @@ class BlueprintApp(App[None]):
         item, part = self.current, self.parts[self.selected]
         key = self._note_key()
         assert item is not None and key is not None
-        kept = KeptNote(item, part.id, text)
-        self._kept[key] = kept
+        kept = KeptNote(item, part.id, text, part.label)
+        self._store_note(key, kept)
         self.set_focus(None)
         self._end_point(keep_note=False)  # `kept` holds the note until it is delivered
         source_lines = self._shown_text.split("\n")
@@ -1187,6 +1226,8 @@ class BlueprintApp(App[None]):
         self._select(index)
 
     def on_diagram_view_clicked(self, event: DiagramView.Clicked) -> None:
+        if self._noting:
+            return  # the note is about the part selected now
         if not self.pointing and not (self._pointable() and self._start_point()):
             return
         for i, part in enumerate(self.parts):
@@ -1197,6 +1238,8 @@ class BlueprintApp(App[None]):
     def on_click(self, event: events.Click) -> None:
         # A click on a document block points at it. Look under the mouse: a click
         # inside a fence (a scroll container) arrives here with the screen as its widget.
+        if self._noting:
+            return  # the note is about the part selected now
         try:
             widget, _region = self.screen.get_widget_at(event.screen_x, event.screen_y)
         except Exception:
@@ -1232,8 +1275,8 @@ class BlueprintApp(App[None]):
     def on_unmount(self) -> None:
         self._closing = True
         if self._live is not None:
+            # The editor in its pane may still save: leave it the copy (it is in the temp folder).
             self._live.stop.set()
-            shutil.rmtree(self._live.folder, ignore_errors=True)
         if self._attachments is not None:
             shutil.rmtree(self._attachments, ignore_errors=True)
 
