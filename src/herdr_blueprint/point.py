@@ -485,6 +485,10 @@ def nearest(parts: list[Part], current: int, direction: str) -> int:
     cx, cy = anchor(parts[current])
     sideways = direction in ("left", "right")
     low, high = _span(parts[current], sideways)
+    # Along the move: a part counts only if it lies wholly beyond this one. A message
+    # spans from one participant to another; below a participant, it isn't beside it.
+    near, far = _span(parts[current], not sideways)
+    forward = direction in ("right", "down")
     best, best_score = current, float("inf")
     next_row, next_row_score = current, (float("inf"), float("inf"))
     for i, part in enumerate(parts):
@@ -493,11 +497,14 @@ def nearest(parts: list[Part], current: int, direction: str) -> int:
         x, y = anchor(part)
         dx, dy = x - cx, y - cy
         ahead, aside = {"right": (dx, dy), "left": (-dx, dy), "down": (dy, dx), "up": (-dy, dx)}[direction]
-        if ahead > 0.5 and not sideways and (ahead, abs(aside)) < next_row_score:
+        first, last = _span(part, not sideways)
+        if (first <= far) if forward else (last >= near):
+            continue
+        if not sideways and (ahead, abs(aside)) < next_row_score:
             next_row, next_row_score = i, (ahead, abs(aside))
         link = _link(parts[current], part)
         start, end = _span(part, sideways)
-        if ahead <= 0.5 or not (link or (start <= high and low <= end)):
+        if not (link or (start <= high and low <= end)):
             continue
         if link == "sibling" and abs(aside) > ahead:
             continue  # branches of one box sit side by side: reached by moving across

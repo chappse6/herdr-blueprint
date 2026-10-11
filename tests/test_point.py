@@ -503,3 +503,36 @@ def test_parts_are_worked_out_once_per_drawing(monkeypatch):
     first = point.diagram_parts(FLOW, (4, 2, 4), text)
     again = point.diagram_parts(FLOW, (4, 2, 4), text)  # a theme change: same layout
     assert first == again and len(calls) == 1
+
+
+SONGI = """sequenceDiagram
+  participant F as 농가
+  participant T as 화면
+  participant D as domain
+  participant S as 폰 저장소
+  F->>T: 질문 3개에 답
+  Note over F,T: 말하기 또는 적기, 사진 최대 3장
+  T->>D: saveTalk(답, 사진)
+  D->>D: 당도·온도 숫자 뽑기
+  D->>D: 조언·일지·카드 생성
+  D-->>T: SavedRecord
+  T->>S: upsertRecord
+  T->>F: 조언 화면
+  F->>T: 소리로 듣기
+"""
+
+
+def test_the_participant_row_walks_sideways_and_messages_lie_below():
+    # Reported: right from the first participant went down to a message, and the last
+    # participant could not be reached. A message spans from one participant to another;
+    # lying below, it is not "to the right" of either.
+    parts = point.diagram_parts(SONGI, (4, 2, 4), draw(SONGI))
+    labels = [p.label for p in parts]
+
+    def step(start, way):
+        return labels[point.nearest(parts, labels.index(start), way)]
+
+    assert [step(name, "right") for name in ("농가", "화면", "domain")] == ["화면", "domain", "폰 저장소"]
+    assert [step(name, "left") for name in ("폰 저장소", "domain", "화면")] == ["domain", "화면", "농가"]
+    assert step("농가", "down") == "질문 3개에 답" and step("폰 저장소", "down") == "upsertRecord"
+    assert step("당도·온도 숫자 뽑기", "down") == "조언·일지·카드 생성"
