@@ -207,6 +207,22 @@ async def test_enter_on_a_box_tied_to_code_asks_for_a_code_change(tmp_path):
         assert "It stands for `src/tollgate.py:12`." in text and "Make this change in the code" in text
 
 
+async def test_a_branch_can_be_pointed_at_and_asked_about(tmp_path):
+    branchy = "graph TD\n  A[Start] --> B{Cached}\n  B -->|hit| C[Return]\n  B -->|miss| D[Fetch]\n"
+    prompter = FakePrompter()
+    app = make_app(tmp_path, prompter=prompter)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        view = await open_drawn(app, pilot, flow_file(tmp_path, branchy))
+        await pilot.press("e")
+        index = next(i for i, p in enumerate(app.parts) if p.label == "miss")
+        app._select(index)
+        assert view.shown.kind == "branch"
+        await pilot.press("enter", *"log it", "enter")
+        await wait_for(pilot, lambda: prompter.sent)
+        assert 'the branch "miss" from "Cached" to "Fetch"' in prompter.sent[0][1]
+
+
 # --- diagrams inside a document ------------------------------------------------------
 
 async def test_j_walks_into_a_drawn_diagram_box_by_box_and_out_again(tmp_path):

@@ -9,6 +9,7 @@ against the drawn text, so a layout that doesn't line up is never offered.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass, replace
 
 from rich.cells import cell_len
@@ -96,7 +97,12 @@ def diagram_parts(source: str, padding: tuple[int, int, int], text: Text) -> lis
     except Exception:
         return []  # termaid could draw it, but not split it into parts
     links = code_links(source)
-    return [replace(part, code=links[part.id]) if part.id in links else part for part in _aligned(parts, text)]
+
+    def code_of(part: Part) -> str:
+        # A branch without its own line stands for the code at its branch point.
+        return links.get(part.id) or (links.get(part.id.split("->")[0], "") if part.kind == "branch" else "")
+
+    return [replace(part, code=code_of(part)) if code_of(part) else part for part in _with_labels(_aligned(parts, text), text)]
 
 
 def whole_diagram(source: str) -> Part:
@@ -119,9 +125,14 @@ def _graph_parts(graph, padding: tuple[int, int, int], source: str) -> list[Part
     padding_x, padding_y, gap = padding
     layout = compute_layout(graph, padding_x, padding_y, gap)
     width, height = layout.canvas_width + 4, layout.canvas_height + 4
-    for routed in route_edges(graph, layout):
+    routes = route_edges(graph, layout)
+    for routed in routes:
         for x, y in routed.draw_path:
             width, height = max(width, x + 2), max(height, y + 2)
+
+    def flipped(x: int, y: int) -> tuple[int, int]:
+        return (width - 1 - x if flip_h else x), (height - 1 - y if flip_v else y)
+
     lines = source.split("\n")
     parts = []
     for node_id in graph.node_order:
@@ -136,7 +147,64 @@ def _graph_parts(graph, padding: tuple[int, int, int], source: str) -> list[Part
         label = getattr(graph.nodes[node_id], "label", "") or node_id
         line = _node_line(lines, node_id)
         parts.append(Part("node", node_id, label, (box,), (line, line) if line else None))
+    # Branches: labelled arrows, and every arrow out of a node with more than one.
+    names = {p.id: p.label for p in parts}
+    outgoing = Counter(routed.edge.source for routed in routes)
+    seen: Counter = Counter()
+    for routed in routes:
+        source_id, target_id = routed.edge.source, routed.edge.target
+        label = (routed.edge.label or "").strip()
+        if not (label or outgoing[source_id] > 1) or source_id not in names or target_id not in names:
+            continue
+        seen[(source_id, target_id)] += 1
+        part_id = f"{source_id}->{target_id}" + (f"#{seen[(source_id, target_id)]}" if seen[(source_id, target_id)] > 1 else "")
+        line = _edge_line(lines, source_id, target_id)
+        detail = f'from "{names[source_id]}" to "{names[target_id]}"'
+        path = _segments([flipped(x, y) for x, y in routed.draw_path])
+        parts.append(Part("branch", part_id, label, tuple(path), (line, line) if line else None, detail))
     return parts
+
+
+def _segments(points: list[tuple[int, int]]) -> list[Box]:
+    """An arrow's path as boxes, one per straight run, without the cells on the boxes it joins."""
+    if len(points) < 2:
+        return []
+
+    def toward(a: tuple[int, int], b: tuple[int, int]) -> tuple[int, int]:
+        return a[0] + (b[0] > a[0]) - (b[0] < a[0]), a[1] + (b[1] > a[1]) - (b[1] < a[1])
+
+    points = [toward(points[0], points[1]), *points[1:-1], toward(points[-1], points[-2])]
+    return [
+        Box(min(x1, x2), min(y1, y2), abs(x2 - x1) + 1, abs(y2 - y1) + 1)
+        for (x1, y1), (x2, y2) in zip(points, points[1:])
+    ]
+
+
+def _with_labels(parts: list[Part], text: Text) -> list[Part]:
+    """Branches with the drawn label in front: it is what the selection starts from."""
+    rows = text.plain.split("\n")
+    nodes = [box for part in parts if part.kind == "node" for box in part.boxes]
+    placed = []
+    for part in parts:
+        if part.kind != "branch" or not part.label or not part.boxes:
+            placed.append(part)
+            continue
+        path = [(x, y) for box in part.boxes for y in range(box.y, box.y + box.height) for x in range(box.x, box.x + box.width)]
+        found = []
+        for y, row in enumerate(rows):
+            for candidate in {part.label, part.label[::-1]}:  # termaid 0.9.0 mirrors RL labels
+                start = row.find(candidate)
+                while start != -1:
+                    box = Box(cell_len(row[:start]), y, cell_len(candidate), 1)
+                    if not any(node.contains(box.x, box.y) for node in nodes):
+                        found.append(box)
+                    start = row.find(candidate, start + 1)
+
+        def distance(box: Box) -> int:
+            return min(max(box.x - x, 0, x - (box.x + box.width - 1)) + abs(box.y - y) for x, y in path)
+
+        placed.append(replace(part, boxes=(min(found, key=distance), *part.boxes)) if found else part)
+    return placed
 
 
 def _sequence_parts(stripped: str, padding: tuple[int, int, int], source: str) -> list[Part]:
@@ -183,6 +251,15 @@ def _node_line(lines: list[str], node_id: str) -> int | None:
         for number, text in enumerate(lines[1:], 2):
             if re.search(pattern, text):
                 return number
+    return None
+
+
+def _edge_line(lines: list[str], source_id: str, target_id: str) -> int | None:
+    """The first line with an arrow from `source_id` to `target_id` (also inside a chain)."""
+    pattern = re.compile(rf"(^|\W){re.escape(source_id)}\b.*?(--|==|-\.).*?(^|\W){re.escape(target_id)}(\W|$)")
+    for number, text in enumerate(lines[1:], 2):
+        if not text.lstrip().startswith("%%") and pattern.search(text):
+            return number
     return None
 
 
@@ -325,6 +402,8 @@ def describe(part: Part) -> str:
         return f'the box "{part.label}"'
     if part.kind == "participant":
         return f'the participant "{part.label}"'
+    if part.kind == "branch":
+        return f'the branch "{part.label}" {part.detail}' if part.label else f"the arrow {part.detail}"
     if part.kind == "message":
         return f'the message "{part.label}" {part.detail}'.rstrip()
     if part.kind == "diagram":

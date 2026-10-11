@@ -65,8 +65,8 @@ def test_state_diagram_nodes_skip_the_start_and_end_dots():
     src = "stateDiagram-v2\n  [*] --> Active\n  Active --> Done: finish\n  Done --> [*]"
     text = draw(src)
     parts = point.diagram_parts(src, (4, 2, 4), text)
-    assert [p.label for p in parts] == ["Active", "Done"]
-    for part in parts:
+    assert [(p.kind, p.label) for p in parts] == [("node", "Active"), ("node", "Done"), ("branch", "finish")]
+    for part in parts[:2]:
         assert_on_corners(text, part)
 
 
@@ -100,7 +100,8 @@ def test_sequence_participants_and_messages():
 def test_source_lines_of_nodes_participants_and_messages():
     flow = "graph TD\n  A[Start] --> B{Choice}\n  B -->|yes| C[Done]\n"
     parts = point.diagram_parts(flow, (4, 2, 4), draw(flow))
-    assert [(p.id, p.lines) for p in parts] == [("A", (2, 2)), ("B", (2, 2)), ("C", (3, 3))]
+    nodes = [p for p in parts if p.kind == "node"]
+    assert [(p.id, p.lines) for p in nodes] == [("A", (2, 2)), ("B", (2, 2)), ("C", (3, 3))]
     seq = point.diagram_parts(SEQ, (4, 2, 4), draw(SEQ))
     assert [p.lines for p in seq] == [(2, 2), (3, 3), (4, 4), (6, 6)]
     implicit = "sequenceDiagram\n  A->>B: hi\n  B-->>A: bye\n"
@@ -173,6 +174,44 @@ def test_parts_of_a_diagram_in_a_document_carry_their_place():
     assert point.describe(placed[1]) == 'the box "Tollgate" in the diagram under "Steps"'
     unplaced = point.fence_parts(replace(block, detail=""), [replace(inner[0], lines=None)])[0]
     assert unplaced.lines == (16, 16) and point.describe(unplaced) == 'the box "브라우저" in the diagram'
+
+
+BRANCHY = """flowchart TD
+  K[Key] --> P{Anything to point at}
+  P -->|no| ED[Edit now]
+  P -->|yes| S[Point mode]
+  S --> M[Move]
+"""
+
+
+def cells(text, box):
+    return [char_at(text, x, y) for y in range(box.y, box.y + box.height) for x in range(box.x, box.x + box.width)]
+
+
+@pytest.mark.parametrize("direction", ["TD", "BT", "LR", "RL"])
+def test_branches_sit_on_their_drawn_paths_and_labels(direction):
+    src = BRANCHY.replace("flowchart TD", f"flowchart {direction}")
+    text = draw(src)
+    branches = [p for p in point.diagram_parts(src, (4, 2, 4), text) if p.kind == "branch"]
+    assert [(p.id, p.label, p.detail) for p in branches] == [
+        ("P->ED", "no", 'from "Anything to point at" to "Edit now"'),
+        ("P->S", "yes", 'from "Anything to point at" to "Point mode"'),
+    ]
+    for part in branches:
+        label, *path = part.boxes
+        drawn = "".join(cells(text, label))
+        assert drawn in (part.label, part.label[::-1])  # termaid 0.9.0 mirrors RL labels
+        assert path and all(ch != " " for box in path for ch in cells(text, box))
+
+
+def test_branch_lines_descriptions_and_code():
+    src = BRANCHY + "  %% code: P src/app.py:994\n  %% code: P->S src/app.py:1000\n"
+    parts = {p.id: p for p in point.diagram_parts(src, (4, 2, 4), draw(src))}
+    assert parts["P->ED"].lines == (3, 3) and parts["P->S"].lines == (4, 4)
+    assert point.describe(parts["P->ED"]) == 'the branch "no" from "Anything to point at" to "Edit now"'
+    assert parts["P->ED"].code == "src/app.py:994"  # the branch point's code
+    assert parts["P->S"].code == "src/app.py:1000"
+    assert "S->M" not in parts  # a plain arrow is not a branch
 
 
 LINKED = (
