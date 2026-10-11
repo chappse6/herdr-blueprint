@@ -1,6 +1,6 @@
 [project]
 name = "herdr-blueprint"
-version = "0.5.1"
+version = "0.6.0"
 description = "Your coding agent explains its work as diagrams in a herdr side pane."
 readme = "README.md"
 license = "MIT"
