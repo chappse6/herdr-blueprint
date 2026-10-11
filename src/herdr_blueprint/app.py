@@ -595,14 +595,15 @@ class BlueprintApp(App[None]):
         await self.action_quit()
 
     def _auto_ask(self) -> None:
-        """Opened next to an agent: ask it once to draw what it is doing, when it is free."""
+        """Opened next to an agent: ask it once to draw what it is doing. A working agent
+        queues the request; one waiting at an approval or question dialog is asked after."""
         source = self.source
         if self._auto_asked or self.current is not None or not (source and source.agent):
             return
-        if source.status in ("working", "blocked"):
+        if source.status == "blocked":
             if not self._waiting_to_ask:
                 self._waiting_to_ask = True
-                self._show_notice(f"{source.agent} is working; Blueprint asks it to draw when it finishes", ok=True)
+                self._show_notice(f"{source.agent} is waiting for your answer; Blueprint asks it to draw after", ok=True)
             return
         self._auto_asked = True
         self.action_ask()

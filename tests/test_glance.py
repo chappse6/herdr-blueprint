@@ -47,13 +47,24 @@ async def test_opened_next_to_an_idle_agent_it_asks_for_a_drawing(tmp_path):
         assert len(asked) == 1 and app.notice == "Asked claude to draw its task"
 
 
-async def test_a_busy_agent_is_asked_when_it_finishes(tmp_path):
-    asked, state = [], {"status": "working"}
+async def test_a_working_agent_is_asked_right_away(tmp_path):
+    # Agents queue what arrives while they work: no need to wait for it to finish.
+    asked = []
+    app = make_app(tmp_path, asked=asked, status="working")
+    async with app.run_test(size=(100, 30)) as pilot:
+        await wait_for(pilot, lambda: asked)
+        await pilot.pause(0.3)
+        assert len(asked) == 1
+
+
+async def test_an_agent_waiting_for_your_answer_is_asked_once_it_is_free(tmp_path):
+    # A prompt can't go to an approval or question dialog (herdr refuses it): wait.
+    asked, state = [], {"status": "blocked"}
     app = make_app(tmp_path, asked=asked, state=state)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(0.3)
-        assert asked == [] and "asks it to draw when it finishes" in app.notice
-        state["status"] = "idle"
+        assert asked == [] and "waiting for your answer" in app.notice
+        state["status"] = "working"
         app.refresh_source()
         await wait_for(pilot, lambda: asked)
         app.refresh_source()
@@ -78,7 +89,7 @@ async def test_the_header_says_when_code_behind_the_drawing_changed(tmp_path):
     (tmp_path / "src").mkdir()
     for name in ("check.ts", "issue.ts"):
         (tmp_path / "src" / name).write_text("x", encoding="utf-8")
-    app = make_app(tmp_path, status="working")  # no auto ask in the way
+    app = make_app(tmp_path, status="blocked")  # no ask on open in the way
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause()
         await app.open_item(Item(kind="mermaid", title="Flow", source=DESIGN, draw=True, at=time.time()))

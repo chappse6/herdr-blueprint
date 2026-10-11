@@ -65,7 +65,8 @@ in your terminal with colors that match your theme.
 ## Next to your agent
 
 Opened next to an agent, Blueprint shows who is there and asks the agent to
-draw what it is doing; a busy agent is asked when it finishes. Press `a` to ask
+draw what it is doing, even while it works (agents queue what arrives); one
+waiting for your answer is asked after. Press `a` to ask
 again, or `o` to open a doc from its folder.
 
 <p align="center">

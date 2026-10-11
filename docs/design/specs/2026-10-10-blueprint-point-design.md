@@ -66,7 +66,8 @@ pick the first/last part and `ctrl+d`/`ctrl+u` move half a screen.
 ### Opening, staleness and the code itself (added 2026-10-11)
 
 Opened next to an agent, Blueprint asks it once to draw what it is doing; a
-busy agent (herdr's agent status) is asked when it finishes, and `a` asks at
+working agent queues it, one at an approval or question dialog (herdr's
+`blocked` status, which refuses prompts) is asked after, and `a` asks at
 most once every 10 seconds. While a drawing is shown, the header says when files
 named by its `%% code:` lines changed since it was sent. Pointing at a part tied
 to code, `c` opens that file at its line in the editor pane.
