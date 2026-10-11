@@ -16,9 +16,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/herdr-demo.gif" alt="Claude Code is asked to explain a login flow, and seconds later Blueprint draws it as a sequence diagram next to the chat">
+  <img src="docs/screenshots/herdr-demo.gif" alt="Blueprint shows the agent's flowchart of POST /token next to Claude Code; the box POST /token is selected, the note 'add rate limiting here' is sent, and after the agent changes the code Blueprint shows the new rate-limit branch">
   <br>
-  <sub>Ask your agent to explain something. Blueprint draws it next to the chat. (<a href="docs/screenshots/herdr-demo.mp4">MP4</a>)</sub>
+  <sub>Point at a box and ask for a change. The agent changes the code behind it, and Blueprint draws the new version. (<a href="docs/screenshots/herdr-demo.mp4">MP4</a>)</sub>
 </p>
 
 ## Why

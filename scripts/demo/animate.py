@@ -1,9 +1,10 @@
 """Turn recorded frames into a short GIF and MP4 of the moment the diagram appears.
 
-Usage: python animate.py FRAMES_DIR ENTER_TIME OUT_STEM
+Usage: python animate.py FRAMES_DIR ENTER_TIME OUT_STEM [ARRIVE_TIME]
 
 FRAMES_DIR holds terminal.py frames (<milliseconds>.json). ENTER_TIME is the
-Unix time the prompt was sent. The run is retimed: the typing plays at real
+Unix time the prompt was sent; ARRIVE_TIME, when the drawing it led to showed
+(by default, the first frame after ENTER_TIME whose header isn't "Start"). The run is retimed: the typing plays at real
 speed, the agent's work is squeezed into a few seconds, and the finished
 screen holds at the end. Needs ffmpeg.
 """
@@ -55,7 +56,7 @@ def main() -> None:
     frames_dir, enter, out = Path(sys.argv[1]), float(sys.argv[2]), Path(sys.argv[3])
     paths = sorted(frames_dir.glob("*.json"), key=lambda p: int(p.stem))
     times = [int(p.stem) / 1000 for p in paths]
-    arrive = next(
+    arrive = float(sys.argv[4]) if len(sys.argv) > 4 else next(
         t for t, p in zip(times, paths)
         if t > enter and "Start" not in header(json.loads(p.read_text()))
     )
