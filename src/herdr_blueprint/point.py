@@ -49,6 +49,7 @@ class Part:
     detail: str = ""
     where: str = ""  # the diagram it sits in, inside a document
     code: str = ""  # the code it stands for, from a `%% code:` line
+    anchor: tuple[float, float] | None = None  # where moving measures from, if not the first box
 
 
 # --- diagrams ----------------------------------------------------------------------
@@ -161,7 +162,10 @@ def _graph_parts(graph, padding: tuple[int, int, int], source: str) -> list[Part
         line = _edge_line(lines, source_id, target_id)
         detail = f'from "{names[source_id]}" to "{names[target_id]}"'
         path = _segments([flipped(x, y) for x, y in routed.draw_path])
-        parts.append(Part("branch", part_id, label, tuple(path), (line, line) if line else None, detail))
+        # Measured from its last run into the target: the only stretch no other branch shares,
+        # and a label can sit off to the side of the arrow.
+        own = path[-1].center if path else None
+        parts.append(Part("branch", part_id, label, tuple(path), (line, line) if line else None, detail, anchor=own))
     return parts
 
 
@@ -355,21 +359,36 @@ def fence_parts(block: Part, parts: list[Part]) -> list[Part]:
 # --- moving and showing --------------------------------------------------------------
 
 
+def anchor(part: Part) -> tuple[float, float]:
+    """Where moving the selection measures from: a branch's path, else the first box."""
+    return part.anchor if part.anchor is not None else part.boxes[0].center
+
+
+def _ends(part_id: str) -> set[str]:
+    """A branch id's two boxes (`P->S`, also inside a document: `block-3/P->S#2`), or the box itself."""
+    base = part_id.rsplit("/", 1)[-1].split("#")[0]
+    return set(base.split("->"))
+
+
 def nearest(parts: list[Part], current: int, direction: str) -> int:
-    """The part closest to `current` in `direction` (left, right, up, down), or `current`."""
+    """The part closest to `current` in `direction` (left, right, up, down), or `current`.
+    A box and the branches joined to it count as half as far: the flow wins over the layout."""
     if not parts or not parts[current].boxes:
         return current
-    cx, cy = parts[current].boxes[0].center
+    cx, cy = anchor(parts[current])
+    here = _ends(parts[current].id)
     best, best_score = current, float("inf")
     for i, part in enumerate(parts):
         if i == current or not part.boxes:
             continue
-        x, y = part.boxes[0].center
+        x, y = anchor(part)
         dx, dy = x - cx, y - cy
         ahead, aside = {"right": (dx, dy), "left": (-dx, dy), "down": (dy, dx), "up": (-dy, dx)}[direction]
         if ahead <= 0.5:
             continue
         score = ahead + 2 * abs(aside)
+        if "branch" in (part.kind, parts[current].kind) and here & _ends(part.id):
+            score /= 2
         if score < best_score:
             best, best_score = i, score
     return best

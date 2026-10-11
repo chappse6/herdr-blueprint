@@ -114,11 +114,18 @@ Add a Mermaid comment for each box: `%% code: <node id> <path>:<line>`, with a
 path relative to the repo. It doesn't show in the drawing; when the user points
 at the box, Blueprint sends that location with the request.
 
+Put them at the end of the diagram (termaid reads the diagram type from the
+first line), under one comment in the user's language that says what they are,
+for someone who opens the source in their editor:
+`%% Blueprint: the code each box stands for (not drawn)`, or in Korean
+`%% Blueprint: 상자별 코드 위치 (그림에는 안 나옴)`.
+
 ```
 flowchart TD
   T[POST /token] --> V{PKCE valid}
   V -->|no| E[400 invalid_grant]
   V -->|yes| I[Issue tokens]
+  %% Blueprint: the code each box stands for (not drawn)
   %% code: T src/routes/token.ts:20
   %% code: V src/auth/pkce.ts:10
   %% code: I src/auth/tokens.ts:31

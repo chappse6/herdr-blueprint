@@ -1273,7 +1273,7 @@ class BlueprintApp(App[None]):
         if self.parts[target].boxes:
             # Into a diagram: its top box going down, its bottom box going up.
             def place(i: int) -> tuple[float, float]:
-                x, y = self.parts[i].boxes[0].center
+                x, y = point.anchor(self.parts[i])
                 return (y, x) if dy > 0 else (-y, x)
 
             target = min(boxes_of(target), key=place)

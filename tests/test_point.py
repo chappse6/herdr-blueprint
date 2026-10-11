@@ -204,6 +204,42 @@ def test_branches_sit_on_their_drawn_paths_and_labels(direction):
         assert path and all(ch != " " for box in path for ch in cells(text, box))
 
 
+KOREAN = """flowchart TD
+  K[e 키] --> P{짚을 부분 있나}
+  P -->|없음| ED[바로 편집]
+  P -->|있음| S[부분 찾기]
+  S --> M[hjkl 이동]
+"""
+
+
+@pytest.mark.parametrize("source", [BRANCHY, KOREAN], ids=["english", "korean"])
+@pytest.mark.parametrize("direction, ahead, back", [("TD", "down", "up"), ("LR", "right", "left")])
+def test_moving_along_the_flow_stops_on_the_branch_both_ways(source, direction, ahead, back):
+    # Labels can sit beside the arrow; the branch is where its path is.
+    src = source.replace("flowchart TD", f"flowchart {direction}")
+    parts = point.diagram_parts(src, (4, 2, 4), draw(src))
+    ids = [p.id for p in parts]
+
+    def step(start, way):
+        return ids[point.nearest(parts, ids.index(start), way)]
+
+    assert step("P", ahead) == "P->ED"  # onto the branch, not past it
+    assert step("P->ED", ahead) == "ED"
+    assert step("ED", back) == "P->ED"
+    assert step("P->ED", back) == "P"
+
+
+def test_moving_back_from_a_box_stops_on_its_own_branch():
+    src = (
+        "flowchart TD\n  R[요청 문장 만들기] --> A{옆 pane 상태}\n  A -->|에이전트| SEND[agent prompt 전송]\n"
+        "  A -->|빈 셸| PICK[에이전트 시작 묻기]\n  A -->|없음| KEEP[메모 보관]\n"
+    )
+    parts = point.diagram_parts(src, (4, 2, 4), draw(src))
+    ids = [p.id for p in parts]
+    for target in ("SEND", "PICK", "KEEP"):
+        assert ids[point.nearest(parts, ids.index(target), "up")] == f"A->{target}"
+
+
 def test_branch_lines_descriptions_and_code():
     src = BRANCHY + "  %% code: P src/app.py:994\n  %% code: P->S src/app.py:1000\n"
     parts = {p.id: p for p in point.diagram_parts(src, (4, 2, 4), draw(src))}
@@ -221,6 +257,8 @@ LINKED = (
 
 
 def test_code_lines_tie_boxes_to_code():
+    explained = "%% Blueprint: the code each box stands for (not drawn)\n%% code: A x.py:1\n"
+    assert point.code_links(explained) == {"A": "x.py:1"}  # the explaining line is not a link
     parts = point.diagram_parts(LINKED, (4, 2, 4), draw(LINKED))
     assert [(p.label, p.code) for p in parts] == [
         ("POST /token", "src/routes/token.ts:42"), ("verifyPkce", "src/auth/pkce.ts:10"),

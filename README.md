@@ -104,6 +104,7 @@ flowchart TD
   T[POST /token] --> V{PKCE valid}
   V -->|no| E[400 invalid_grant]
   V -->|yes| I[Issue tokens]
+  %% Blueprint: the code each box stands for (not drawn)
   %% code: V src/auth/pkce.ts:10
 ```
 
