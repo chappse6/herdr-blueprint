@@ -131,6 +131,47 @@ def test_nearest_moves_by_direction():
     assert point.nearest(vertical, 0, "down") == 1 and point.nearest(vertical, 1, "up") == 0
 
 
+FLOWING = """flowchart TD
+  K[e 키] --> P{짚을 부분 있나}
+  P -->|없음| ED[바로 편집]
+  P -->|있음| C[부분 찾기]
+  C --> M[hjkl 이동]
+  M --> N[Enter 메모]
+  N --> R[요청 문장 만들기]
+  R --> A{옆 pane 상태}
+  A -->|에이전트| SEND[agent prompt 전송]
+  A -->|빈 셸| PICK[에이전트 시작 묻기]
+  A -->|없음| KEEP[메모 보관]
+  SEND --> OK{전송 결과}
+  OK -->|성공| DONE[보냈다고 표시]
+  OK -->|실패| KEEP
+"""
+
+
+def test_moving_stays_within_its_direction_unless_an_arrow_leads_there():
+    parts = point.diagram_parts(FLOWING, (4, 2, 4), draw(FLOWING))
+    ids = [p.id for p in parts]
+
+    def step(start, way):
+        return ids[point.nearest(parts, ids.index(start), way)]
+
+    assert step("P->C", "right") == "P->C"  # nothing to its right: no jump to a far branch
+    assert step("P->ED", "right") == "P->C"
+    assert step("C", "down") == "M"  # down and to the left, but the arrow goes there
+    assert step("ED", "right") == "C"
+    # Sideways means the same rows: nothing beside these boxes, so no diagonal jump.
+    assert [step(start, "right") for start in ("K", "N", "R", "DONE")] == ["K", "N", "R", "DONE"]
+    assert step("SEND", "right") == "PICK" and step("A", "right") == "A->PICK"
+    assert step("PICK", "left") == "SEND"  # the neighbour on the row, not the box an arrow comes from
+
+
+def test_moving_down_from_a_participant_reaches_its_first_message():
+    parts = point.diagram_parts(SEQ, (4, 2, 4), draw(SEQ))
+    ids = [p.id for p in parts]
+    assert ids[point.nearest(parts, ids.index("T"), "down")] == "message-1"
+    assert ids[point.nearest(parts, ids.index("message-1"), "down")] == "message-2"
+
+
 def test_highlight_reverses_only_the_selected_box():
     text = draw(FLOW)
     parts = point.diagram_parts(FLOW, (4, 2, 4), text)

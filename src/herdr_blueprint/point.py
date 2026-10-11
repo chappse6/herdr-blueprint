@@ -50,6 +50,7 @@ class Part:
     where: str = ""  # the diagram it sits in, inside a document
     code: str = ""  # the code it stands for, from a `%% code:` line
     anchor: tuple[float, float] | None = None  # where moving measures from, if not the first box
+    joined: frozenset[str] = frozenset()  # ids an arrow joins it to (a box's neighbours, a message's participants)
 
 
 # --- diagrams ----------------------------------------------------------------------
@@ -135,6 +136,10 @@ def _graph_parts(graph, padding: tuple[int, int, int], source: str) -> list[Part
         return (width - 1 - x if flip_h else x), (height - 1 - y if flip_v else y)
 
     lines = source.split("\n")
+    neighbours: dict[str, set[str]] = {}
+    for routed in routes:
+        neighbours.setdefault(routed.edge.source, set()).add(routed.edge.target)
+        neighbours.setdefault(routed.edge.target, set()).add(routed.edge.source)
     parts = []
     for node_id in graph.node_order:
         if node_id.startswith("[*]"):
@@ -147,7 +152,10 @@ def _graph_parts(graph, padding: tuple[int, int, int], source: str) -> list[Part
             box = replace(box, y=height - box.y - box.height)
         label = getattr(graph.nodes[node_id], "label", "") or node_id
         line = _node_line(lines, node_id)
-        parts.append(Part("node", node_id, label, (box,), (line, line) if line else None))
+        parts.append(Part(
+            "node", node_id, label, (box,), (line, line) if line else None,
+            joined=frozenset(neighbours.get(node_id, ())),
+        ))
     # Branches: labelled arrows, and every arrow out of a node with more than one.
     names = {p.id: p.label for p in parts}
     outgoing = Counter(routed.edge.source for routed in routes)
@@ -240,7 +248,10 @@ def _sequence_parts(stripped: str, padding: tuple[int, int, int], source: str) -
         line = message_lines[count] if count < len(message_lines) else None
         count += 1
         detail = f"from {label_of[event.source]} to {label_of[event.target]}"
-        parts.append(Part("message", f"message-{count}", event.label, (box,), (line, line) if line else None, detail))
+        parts.append(Part(
+            "message", f"message-{count}", event.label, (box,), (line, line) if line else None, detail,
+            joined=frozenset((event.source, event.target)),
+        ))
     return parts
 
 
@@ -370,13 +381,39 @@ def _ends(part_id: str) -> set[str]:
     return set(base.split("->"))
 
 
+def _link(a: Part, b: Part) -> str | None:
+    """How an arrow joins two parts: "arrow" for neighbouring boxes, a box and its own
+    branch, a message and its participants; "sibling" for two branches of one box."""
+    ends_a, ends_b = _ends(a.id), _ends(b.id)
+    if a.kind == "branch" and b.kind == "branch":
+        return "sibling" if ends_a & ends_b else None
+    if "branch" in (a.kind, b.kind):
+        return "arrow" if ends_a & ends_b else None  # only its own two boxes
+    return "arrow" if ends_a & b.joined or ends_b & a.joined else None
+
+
+def _span(part: Part, sideways: bool) -> tuple[int, int]:
+    """The rows (moving sideways) or columns (moving up or down) a part takes. A branch
+    takes its label and its last run, not the trunk it may share."""
+    boxes = [part.boxes[-1], part.boxes[0]] if part.kind == "branch" and part.label else [part.boxes[-1]]
+    if sideways:
+        return min(b.y for b in boxes), max(b.y + b.height - 1 for b in boxes)
+    return min(b.x for b in boxes), max(b.x + b.width - 1 for b in boxes)
+
+
 def nearest(parts: list[Part], current: int, direction: str) -> int:
     """The part closest to `current` in `direction` (left, right, up, down), or `current`.
-    A box and the branches joined to it count as half as far: the flow wins over the layout."""
+
+    Moving sideways only reaches parts on the same rows, up or down only parts in the
+    same columns, so nothing that way means no move. Parts an arrow joins to `current`
+    count wherever they are (sibling branches within 45 degrees), and being off to the
+    side costs them less.
+    """
     if not parts or not parts[current].boxes:
         return current
     cx, cy = anchor(parts[current])
-    here = _ends(parts[current].id)
+    sideways = direction in ("left", "right")
+    low, high = _span(parts[current], sideways)
     best, best_score = current, float("inf")
     for i, part in enumerate(parts):
         if i == current or not part.boxes:
@@ -384,11 +421,14 @@ def nearest(parts: list[Part], current: int, direction: str) -> int:
         x, y = anchor(part)
         dx, dy = x - cx, y - cy
         ahead, aside = {"right": (dx, dy), "left": (-dx, dy), "down": (dy, dx), "up": (-dy, dx)}[direction]
-        if ahead <= 0.5:
+        link = _link(parts[current], part)
+        start, end = _span(part, sideways)
+        if ahead <= 0.5 or not (link or (start <= high and low <= end)):
             continue
-        score = ahead + 2 * abs(aside)
-        if "branch" in (part.kind, parts[current].kind) and here & _ends(part.id):
-            score /= 2
+        if link == "sibling" and abs(aside) > ahead:
+            continue  # branches of one box sit side by side: reached by moving across
+        # Off to the side costs less along an arrow: it may bend, a neighbour on the row doesn't.
+        score = ahead + (0.5 if link else 2) * abs(aside)
         if score < best_score:
             best, best_score = i, score
     return best
