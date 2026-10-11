@@ -580,7 +580,7 @@ async def test_theme_picker_q_cancels_like_escape():
 def start_app(source=None, asker=None, finder=None, refresher=None) -> BlueprintApp:
     # Tests never ask the real herdr: the neighbor stays as given unless a test says otherwise.
     return BlueprintApp(
-        settings=Config(theme="rose-pine"), source=source, asker=asker, finder=finder,
+        ask_on_open=False, settings=Config(theme="rose-pine"), source=source, asker=asker, finder=finder,
         refresher=refresher or (lambda pane_id: source),
     )
 

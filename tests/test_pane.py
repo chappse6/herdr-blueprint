@@ -305,3 +305,23 @@ def test_focusing_a_plugin_pane():
 
     pane.focus_plugin_pane("herdr", "w1:pE", run=run)
     assert seen["cmd"] == ["herdr", "plugin", "pane", "focus", "w1:pE"]
+
+
+def test_source_reads_whether_the_agent_is_working():
+    run = completed(pane_json(agent="claude", cwd="/w", agent_status="working"))
+    source = pane.source_of("herdr", "w1:p1", run=run)
+    assert source.status == "working"
+    # The status changes all the time; it doesn't make a different neighbor.
+    assert source == pane.Source("w1:p1", agent="claude", cwd=Path("/w"))
+
+
+def test_the_editor_pane_can_leave_its_exit_code_elsewhere(tmp_path):
+    seen = []
+
+    def run(cmd, **kwargs):
+        seen.append(cmd)
+        return completed(json.dumps({"result": {"plugin_pane": {"pane": {"pane_id": "w1:pE"}}}}))(cmd)
+
+    exit_path = tmp_path / "jump.exit"
+    assert pane.open_editor_pane("herdr", "w1:p1", ["nvim"], tmp_path / "a.py", run=run, exit_path=exit_path) == "w1:pE"
+    assert f"BLUEPRINT_EDIT_EXIT={exit_path}" in seen[0]

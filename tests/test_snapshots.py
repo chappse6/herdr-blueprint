@@ -55,7 +55,7 @@ def start_app(monkeypatch) -> BlueprintApp:
     # The folder line uses the OS path separator; keep snapshots the same everywhere.
     monkeypatch.setattr("herdr_blueprint.start.short_folder", lambda path, home=None: "~/…/shop/web")
     return BlueprintApp(
-        settings=Config(theme="rose-pine"), source=SOURCE, finder=lambda folder: FILES,
+        ask_on_open=False, settings=Config(theme="rose-pine"), source=SOURCE, finder=lambda folder: FILES,
         refresher=lambda pane_id: SOURCE,  # never the real herdr
     )
 

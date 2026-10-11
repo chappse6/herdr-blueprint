@@ -77,7 +77,7 @@ class FakePrompter:
 def make_app(tmp_path, fake, prompter=None, editor=None):
     source = Source("w1:p1", agent="claude", cwd=tmp_path)
     return BlueprintApp(
-        settings=Config(theme="rose-pine"), source=source, refresher=lambda pane_id: source,
+        ask_on_open=False, settings=Config(theme="rose-pine"), source=source, refresher=lambda pane_id: source,
         prompter=prompter or FakePrompter(), editor=editor or (lambda command: 0),
         find_editor=lambda: ["/usr/bin/nvim"], idle_shell=lambda pane_id: False, kinds=lambda: [],
         pane_editor=fake.open, focus_pane=fake.focus, pane_alive=fake.exists,

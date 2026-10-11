@@ -49,7 +49,7 @@ class FakeEditor:
 def make_app(tmp_path, prompter=None, editor=None, find_editor=None):
     source = Source("w1:p1", agent="claude", cwd=tmp_path)
     return BlueprintApp(
-        settings=Config(theme="rose-pine"), source=source, refresher=lambda pane_id: source,
+        ask_on_open=False, settings=Config(theme="rose-pine"), source=source, refresher=lambda pane_id: source,
         prompter=prompter or FakePrompter(), editor=editor or FakeEditor(),
         find_editor=find_editor or (lambda: ["/usr/bin/nvim"]),
         idle_shell=lambda pane_id: False, kinds=lambda: [],
@@ -608,3 +608,30 @@ async def test_a_diagram_that_cannot_be_drawn_is_tried_once(tmp_path, monkeypatc
         await wait_for(pilot, lambda: calls)
         await pilot.pause(0.3)
         assert len(calls) == 1
+
+
+async def test_c_opens_the_code_behind_the_selected_box(tmp_path):
+    code = tmp_path / "src" / "tollgate.py"
+    code.parent.mkdir(parents=True, exist_ok=True)
+    code.write_text("x\n" * 20, encoding="utf-8")
+    opened = []
+    app = make_app(tmp_path)
+    app._code_pane = lambda command, path: opened.append((command, path)) or "w1:pC"
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        await open_drawn(app, pilot, flow_file(tmp_path, FLOW + "  %% code: B src/tollgate.py:12\n"))
+        await pilot.press("e")
+        assert not app.check_action("jump_code", ())  # Browser has no code line
+        await pilot.press("l", "c")
+        await wait_for(pilot, lambda: app.notice == "Opened src/tollgate.py:12")
+        assert opened == [(["/usr/bin/nvim", "+12"], code)] and app.pointing and not app.editing
+
+
+async def test_c_says_when_the_code_is_not_there(tmp_path):
+    app = make_app(tmp_path)
+    app._code_pane = lambda command, path: "w1:pC"
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        await open_drawn(app, pilot, flow_file(tmp_path, FLOW + "  %% code: B src/gone.py:3\n"))
+        await pilot.press("e", "l", "c")
+        assert app.notice == "Cannot find src/gone.py"

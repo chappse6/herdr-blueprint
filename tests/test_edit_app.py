@@ -59,7 +59,7 @@ def make_app(tmp_path, *, editor, prompter=None, source="agent", refresher=None,
     if source == "agent":
         source = Source("w1:p1", agent="claude", cwd=tmp_path)
     return BlueprintApp(
-        settings=Config(theme="rose-pine"),
+        ask_on_open=False, settings=Config(theme="rose-pine"),
         source=source,
         refresher=refresher or (lambda pane_id: source),
         editor=editor,

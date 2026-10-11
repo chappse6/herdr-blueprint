@@ -263,3 +263,19 @@ def test_the_session_writes_an_exit_code_even_when_running_the_editor_breaks(tmp
     with pytest.raises(RuntimeError):
         edit.run_session(env, run=broken)
     assert edit.exit_file(copy).read_text() == "1"
+
+
+def test_the_session_can_write_its_exit_code_elsewhere(tmp_path):
+    import json
+    import subprocess
+
+    code_file = tmp_path / "src" / "a.py"  # the agent's code: nothing may appear next to it
+    code_file.parent.mkdir()
+    code_file.write_text("x", encoding="utf-8")
+    elsewhere = tmp_path / "jump.exit"
+    env = {
+        edit.SESSION_COPY: str(code_file), edit.SESSION_COMMAND: json.dumps(["nvim"]),
+        edit.SESSION_EXIT: str(elsewhere),
+    }
+    assert edit.run_session(env, run=lambda command: subprocess.CompletedProcess(command, 0)) == 0
+    assert elsewhere.read_text() == "0" and sorted(p.name for p in code_file.parent.iterdir()) == ["a.py"]

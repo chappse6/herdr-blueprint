@@ -271,6 +271,7 @@ def agent_name(kind: str, pane_id: str) -> str:
 # copy, then closes.
 SESSION_COPY = "BLUEPRINT_EDIT_COPY"
 SESSION_COMMAND = "BLUEPRINT_EDIT_COMMAND"
+SESSION_EXIT = "BLUEPRINT_EDIT_EXIT"  # where the exit code goes, if not next to the file
 EXIT_SUFFIX = ".exit"
 
 
@@ -320,7 +321,7 @@ def run_session(environ: Mapping[str, str], run: Callable | None = None) -> int:
     except OSError:
         code = 127
     finally:
-        done = exit_file(copy)
+        done = Path(environ[SESSION_EXIT]) if environ.get(SESSION_EXIT) else exit_file(copy)
         try:
             tmp = done.with_name(done.name + ".tmp")
             tmp.write_text(str(code), encoding="utf-8")

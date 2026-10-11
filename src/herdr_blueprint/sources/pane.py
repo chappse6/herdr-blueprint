@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..item import VIEWABLE_SUFFIXES, clean
@@ -35,6 +35,8 @@ class Source:
     agent: str | None = None
     task: str | None = None
     cwd: Path | None = None
+    # herdr's agent_status (idle, working, ...): changes all the time, so not part of equality.
+    status: str | None = field(default=None, compare=False)
 
 
 def _herdr(herdr: str, args: list[str], run, timeout: float = TIMEOUT) -> tuple[dict | None, str | None]:
@@ -87,6 +89,7 @@ def source_of(herdr: str, pane_id: str | None, run=subprocess.run) -> Source | N
         agent=clean(str(agent)) if agent else None,
         task=clean(str(task)) if task else None,
         cwd=Path(folder) if folder else None,
+        status=str(info.get("agent_status")) if info.get("agent_status") else None,
     )
 
 
@@ -153,16 +156,21 @@ def start_agent(herdr: str, source: Source, kind: str, run=subprocess.run) -> tu
 PLUGIN_ID = "seeun.blueprint"
 
 
-def open_editor_pane(herdr: str, target_pane: str | None, command: list[str], copy: Path, run=subprocess.run) -> str | None:
-    """Open the editor pane below `target_pane` on `copy`: its pane id, or None (outside herdr, or it failed)."""
+def open_editor_pane(
+    herdr: str, target_pane: str | None, command: list[str], copy: Path, run=subprocess.run,
+    exit_path: Path | None = None,
+) -> str | None:
+    """Open the editor pane below `target_pane` on `copy`: its pane id, or None (outside herdr,
+    or it failed). `exit_path` puts the editor's exit code elsewhere than next to the file."""
     if not target_pane:
         return None
-    from ..edit import SESSION_COMMAND, SESSION_COPY
+    from ..edit import SESSION_COMMAND, SESSION_COPY, SESSION_EXIT
 
+    extra = ["--env", f"{SESSION_EXIT}={exit_path}"] if exit_path else []
     result, _code = _herdr(herdr, [
         "plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "editor",
         "--placement", "split", "--direction", "down", "--target-pane", target_pane,
-        "--env", f"{SESSION_COPY}={copy}", "--env", f"{SESSION_COMMAND}={json.dumps(command)}", "--focus",
+        "--env", f"{SESSION_COPY}={copy}", "--env", f"{SESSION_COMMAND}={json.dumps(command)}", *extra, "--focus",
     ], run)
     try:
         return str(result["plugin_pane"]["pane"]["pane_id"]) if result else None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -275,6 +276,7 @@ class BlueprintApp(App[None]):
         Binding("e", "edit_text", "Edit text"),  # while pointing: edit the text at the part
         # Point mode only.
         Binding("enter", "point_ask", "Ask", key_display="⏎"),
+        Binding("c", "jump_code", "Code"),  # pointing at a part tied to code: open that code
         Binding("escape", "point_done", "Done", key_display="esc"),
         # Only offered when Blueprint knows the pane it was opened next to.
         Binding("a", "ask", "Ask"),
@@ -301,6 +303,7 @@ class BlueprintApp(App[None]):
         pane_editor: Callable[[list[str], Path], str | None] | None = None,
         focus_pane: Callable[[str], None] | None = None,
         pane_alive: Callable[[str], bool] | None = None,
+        ask_on_open: bool = True,
     ) -> None:
         super().__init__()
         self.settings = settings or config_store.load()
@@ -324,10 +327,19 @@ class BlueprintApp(App[None]):
         )
         self._focus_pane = focus_pane or (lambda pane_id: pane.focus_plugin_pane(herdr, pane_id))
         self._pane_alive = pane_alive or (lambda pane_id: pane.pane_exists(herdr, pane_id))
+        # `c`: the code behind a part, opened in the editor pane (its exit code goes to the temp folder).
+        jump_exit = Path(tempfile.gettempdir()) / f"blueprint-code-{os.getpid()}.exit"
+        self._code_pane = (
+            lambda command, path: pane.open_editor_pane(herdr, own_pane, command, path, exit_path=jump_exit)
+            if self.source else None
+        )
         self._live: LiveEdit | None = None
         self._held: Item | None = None  # the newest send that arrived during a live edit or a note
         self._noting = False  # the note line is open: sends wait for it
         self._opening = False  # herdr is opening the editor pane: sends and e wait for it
+        self._auto_asked = not ask_on_open  # asked the neighbor to draw once, when Blueprint opened
+        self._waiting_to_ask = False
+        self.stale_files: list[str] = []  # code behind the drawing changed since it was sent
         self._live_timer = None
         self.preview_text: str | None = None  # what the live preview shows
         # Unsent edits, one per document; the next `e` on that document reopens it.
@@ -376,6 +388,8 @@ class BlueprintApp(App[None]):
         self.set_interval(30, self._update_status)
         if self.source:
             self.set_interval(NEIGHBOR_SECONDS, self.refresh_source)
+            self.set_interval(NEIGHBOR_SECONDS, self.check_freshness)
+            self._auto_ask()
 
     async def _read_inbox(self) -> None:
         # A broken inbox must not close the viewer: say so in the header instead.
@@ -476,6 +490,7 @@ class BlueprintApp(App[None]):
             if dropped:
                 self.notice = f"Your unsent work on '{clean(title)}' was dropped"
                 self.notice_ok = False
+        self.stale_files = []
         self.refresh_bindings()
         self._update_status()
         return bool(dropped)
@@ -519,11 +534,31 @@ class BlueprintApp(App[None]):
         status = Text()
         if self.notice and not narrow:
             status.append_text(notice)
+        elif self.stale_files and self.current:
+            count = len(self.stale_files)
+            stale = "⚠ code changed" if narrow else f"⚠ code changed since drawn ({count} file{'s' if count > 1 else ''}) · a redraws"
+            status.append(stale, style=f"bold {palette.warning}")
         elif self.current and narrow:
             status.append(ago(self.current.at).removesuffix(" ago").replace("just ", ""))
         elif self.current:
             status.append(f"from {self.current.sent_by} {ago(self.current.at)}")
         status_bar.update(status)
+
+    def check_freshness(self) -> None:
+        """Note the files behind the drawing (its `%% code:` lines) changed since it was sent."""
+        stale: list[str] = []
+        item, folder = self.current, self.source.cwd if self.source else None
+        if item is not None and folder is not None:
+            files = dict.fromkeys(re.sub(r":\d+(-\d+)?$", "", where.strip()) for where in point.code_links(self._shown_text).values())
+            for name in files:
+                try:
+                    if (folder / name).stat().st_mtime > item.at:
+                        stale.append(name)
+                except OSError:
+                    continue
+        if stale != self.stale_files:
+            self.stale_files = stale
+            self._update_status()
 
     def on_resize(self) -> None:
         if self.is_mounted:
@@ -534,6 +569,9 @@ class BlueprintApp(App[None]):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in ("point_ask", "point_done"):
             return self.pointing
+        if action == "jump_code":
+            part = self.parts[self.selected] if self.pointing and self.parts else None
+            return bool(part and part.code) and not self._noting
         if self.pointing and action in ("ask", "open_file", "pick_theme", "reload", "leave"):
             return False  # point mode offers only its own keys
         # Hidden from the footer and the keys do nothing when there is no pane to use.
@@ -552,6 +590,19 @@ class BlueprintApp(App[None]):
     async def action_leave(self) -> None:
         """q quits, outside point mode; ctrl+q always does."""
         await self.action_quit()
+
+    def _auto_ask(self) -> None:
+        """Opened next to an agent: ask it once to draw what it is doing, when it is free."""
+        source = self.source
+        if self._auto_asked or self.current is not None or not (source and source.agent):
+            return
+        if source.status in ("working", "blocked"):
+            if not self._waiting_to_ask:
+                self._waiting_to_ask = True
+                self._show_notice(f"{source.agent} is working; Blueprint asks it to draw when it finishes", ok=True)
+            return
+        self._auto_asked = True
+        self.action_ask()
 
     def action_ask(self) -> None:
         """Ask the agent next to Blueprint to draw what it is doing."""
@@ -592,9 +643,12 @@ class BlueprintApp(App[None]):
 
     async def _apply_neighbor(self, fresh: pane.Source) -> None:
         if fresh == self.source:
+            self.source = fresh  # the same neighbor; its status may have changed
+            self._auto_ask()
             return
         self.source = fresh
         self.refresh_bindings()
+        self._auto_ask()
         async with self._render_lock:
             # Only the start screen shows the neighbor; never replace a send.
             old = self.query(StartView)
@@ -1196,6 +1250,46 @@ class BlueprintApp(App[None]):
 
         self._send_request(Request(key, item, described, build, kept))
         self._release_held()
+
+    def action_jump_code(self) -> None:
+        """Open the code behind the selected part in the editor pane (or this pane)."""
+        if not self.check_action("jump_code", ()):
+            return
+        where = self.parts[self.selected].code.strip()
+        found = re.match(r"^(.*?)(?::(\d+))?(?:-\d+)?$", where)
+        name, line = found.group(1), int(found.group(2)) if found.group(2) else None
+        folder = self.source.cwd if self.source and self.source.cwd else Path.cwd()
+        path = folder / name
+        if not path.is_file():
+            self._show_notice(f"Cannot find {clean(name)}")
+            return
+        try:
+            command = self._find_editor()
+        except edit.EditorError as exc:
+            self._show_notice(clean(str(exc)))
+            return
+        if not command:
+            self._show_notice("No editor found: set $EDITOR")
+            return
+        command = [*command, *edit.line_arg(command, line)]
+
+        def open_code() -> None:
+            try:
+                pane_id = self._code_pane(command, path)
+            except Exception:
+                pane_id = None
+            self.call_from_thread(self._code_opened, pane_id, command, path, where)
+
+        self.run_worker(open_code, thread=True, group="code-pane", exit_on_error=False)
+
+    def _code_opened(self, pane_id: str | None, command: list[str], path: Path, where: str) -> None:
+        if not pane_id:
+            try:
+                self._editor([*command, str(path)])  # no editor pane: borrow this one
+            except (OSError, SuspendNotSupported) as exc:
+                self._show_notice(f"Could not run the editor: {clean(str(exc))}")
+                return
+        self._show_notice(f"Opened {clean(where)}", ok=True)
 
     def action_point_done(self) -> None:
         if self.query(NoteLine):
