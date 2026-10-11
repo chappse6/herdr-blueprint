@@ -15,6 +15,8 @@ from rich.cells import cell_len
 from rich.style import Style
 from rich.text import Text
 
+# `%% code: <id> <where>`: a Mermaid comment tying a box to the code it stands for.
+_CODE_LINE = re.compile(r"^\s*%%\s*code:\s*(\S+)\s+(.+?)\s*$", re.MULTILINE)
 # Message arrows in a sequence diagram source line.
 _ARROW = re.compile(r"^\s*[^%].*?(-{1,2}>>|-{1,2}>|-{1,2}x|-{1,2}\))")
 
@@ -45,9 +47,15 @@ class Part:
     lines: tuple[int, int] | None = None  # 1-based, inclusive
     detail: str = ""
     where: str = ""  # the diagram it sits in, inside a document
+    code: str = ""  # the code it stands for, from a `%% code:` line
 
 
 # --- diagrams ----------------------------------------------------------------------
+
+
+def code_links(source: str) -> dict[str, str]:
+    """Box id -> the code it stands for, from the diagram's `%% code:` lines."""
+    return {found.group(1): found.group(2) for found in _CODE_LINE.finditer(source)}
 
 
 def _strip(source: str) -> str:
@@ -87,7 +95,8 @@ def diagram_parts(source: str, padding: tuple[int, int, int], text: Text) -> lis
             return []
     except Exception:
         return []  # termaid could draw it, but not split it into parts
-    return _aligned(parts, text)
+    links = code_links(source)
+    return [replace(part, code=links[part.id]) if part.id in links else part for part in _aligned(parts, text)]
 
 
 def whole_diagram(source: str) -> Part:
@@ -355,20 +364,26 @@ def point_prompt(
     diagram: bool = True,
     source: str | None = None,
     attachment=None,
+    code: str = "",
 ) -> str:
-    """What Enter sends: the part, where it is, the person's note, and what to do."""
+    """What Enter sends: the part, where it is, the person's note, and what to do.
+
+    A part tied to code (`%% code:`) is a work order: change that code, test,
+    and redraw. Anything else asks to change the part and what it describes.
+    """
     from .edit import fenced
 
     where = _where(lines, line_text)
+    stands = f" It stands for `{code}`." if code else ""
+    work = "Make this change in the code there and anything that depends on it, run the tests, then "
     if file_label is not None:
-        return (
-            f"In Blueprint I pointed at {described} in `{file_label}`{where}.\n{note}\n"
-            "Change it and anything it describes, then show the result in Blueprint.\n"
+        todo = f"{work}update the diagram to match and show it in Blueprint." if code else (
+            "Change it and anything it describes, then show the result in Blueprint."
         )
+        return f"In Blueprint I pointed at {described} in `{file_label}`{where}.{stands}\n{note}\n{todo}\n"
     what = "diagram" if diagram else "note"
     body = f"Its source is in `{attachment}`." if attachment else fenced(source or "", "mermaid" if diagram else "markdown")
-    return (
-        f"In Blueprint I pointed at {described} in the {what} you sent ('{title}'){where}.\n{note}\n"
-        "Change it and anything it describes, then send the new version to Blueprint.\n"
-        f"{body}\n"
+    todo = f"{work}send the updated diagram to Blueprint." if code else (
+        "Change it and anything it describes, then send the new version to Blueprint."
     )
+    return f"In Blueprint I pointed at {described} in the {what} you sent ('{title}'){where}.{stands}\n{note}\n{todo}\n{body}\n"

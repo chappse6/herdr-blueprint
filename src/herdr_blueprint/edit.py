@@ -161,12 +161,29 @@ def needs_attachment(body: str) -> bool:
     return len(body) > INLINE_LIMIT
 
 
-def file_prompt(label: str, diff: str, *, diverged: bool, attachment: Path | None = None) -> str:
+def tied_to_code(text: str) -> bool:
+    """Whether a diagram ties its boxes to code with `%% code:` lines."""
+    from .point import code_links
+
+    return bool(code_links(text))
+
+
+# An edit of a diagram tied to code is a work order on that code.
+CODE_WORK = "make the change in the code its `%% code:` lines point to, run the tests, then "
+
+
+def file_prompt(
+    label: str, diff: str, *, diverged: bool, attachment: Path | None = None, tied_to_code: bool = False,
+) -> str:
     """What the agent gets after an edit of a file."""
-    lines = [
-        f"I edited `{label}` in Blueprint. Apply this change to the file and to anything "
-        "that depends on it, then show the result in Blueprint.",
-    ]
+    if tied_to_code:
+        first = f"I edited `{label}` in Blueprint. Apply this change to the file, {CODE_WORK}show the result in Blueprint."
+    else:
+        first = (
+            f"I edited `{label}` in Blueprint. Apply this change to the file and to anything "
+            "that depends on it, then show the result in Blueprint."
+        )
+    lines = [first]
     if diverged:
         lines.append(
             "The file changed on disk while I was editing, so read the file first and "
@@ -176,12 +193,16 @@ def file_prompt(label: str, diff: str, *, diverged: bool, attachment: Path | Non
     return "\n".join(lines) + "\n"
 
 
-def text_prompt(title: str, source: str, *, diagram: bool, attachment: Path | None = None) -> str:
+def text_prompt(
+    title: str, source: str, *, diagram: bool, attachment: Path | None = None, tied_to_code: bool = False,
+) -> str:
     """What the agent gets after an edit of text it sent: the new version, not a diff."""
     what = "diagram" if diagram else "note"
+    todo = f"{CODE_WORK}send the updated version to Blueprint." if tied_to_code else (
+        "update what it describes, then send the new version to Blueprint."
+    )
     lines = [
-        f"I edited the {what} you sent ('{title}') in Blueprint. This is what I want instead; "
-        "update what it describes, then send the new version to Blueprint.",
+        f"I edited the {what} you sent ('{title}') in Blueprint. This is what I want instead; {todo}",
         f"The new version is in `{attachment}`." if attachment else fenced(source, "mermaid" if diagram else "markdown"),
     ]
     return "\n".join(lines) + "\n"

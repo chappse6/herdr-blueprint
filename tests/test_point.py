@@ -175,6 +175,37 @@ def test_parts_of_a_diagram_in_a_document_carry_their_place():
     assert unplaced.lines == (16, 16) and point.describe(unplaced) == 'the box "브라우저" in the diagram'
 
 
+LINKED = (
+    "graph LR\n  A[POST /token] --> B[verifyPkce]\n"
+    "  %% code: A src/routes/token.ts:42\n  %% code: B src/auth/pkce.ts:10\n"
+)
+
+
+def test_code_lines_tie_boxes_to_code():
+    parts = point.diagram_parts(LINKED, (4, 2, 4), draw(LINKED))
+    assert [(p.label, p.code) for p in parts] == [
+        ("POST /token", "src/routes/token.ts:42"), ("verifyPkce", "src/auth/pkce.ts:10"),
+    ]
+    block = point.Part("diagram", "block-2", "mermaid", (), (5, 9), "Token")
+    assert point.fence_parts(block, parts)[1].code == "src/auth/pkce.ts:10"
+
+
+def test_a_part_tied_to_code_asks_for_a_code_change():
+    asked = point.point_prompt(
+        'the box "verifyPkce"', "401 for expired codes", lines=(3, 3), line_text="B[verifyPkce]",
+        file_label="docs/token.mmd", code="src/auth/pkce.ts:10",
+    )
+    assert "It stands for `src/auth/pkce.ts:10`." in asked
+    assert "Make this change in the code" in asked and "run the tests" in asked
+    sent = point.point_prompt(
+        'the box "verifyPkce"', "401", lines=(3, 3), line_text="", title="Token", source=LINKED,
+        code="src/auth/pkce.ts:10",
+    )
+    assert "Make this change in the code" in sent and "send the updated diagram to Blueprint" in sent
+    plain = point.point_prompt('the box "A"', "x", lines=None, line_text="", file_label="a.mmd")
+    assert "Change it and anything it describes" in plain and "stands for" not in plain
+
+
 # --- documents --------------------------------------------------------------------
 
 from textual.app import App  # noqa: E402

@@ -959,11 +959,16 @@ class BlueprintApp(App[None]):
                 diverged = True
             stem = edit.copy_name(item.path.name, diagram=False).removesuffix(".md")
             attachment = self._attach(diff, stem, ".diff") if edit.needs_attachment(diff) else None
-            return edit.file_prompt(label, diff, diverged=diverged, attachment=attachment)
+            return edit.file_prompt(
+                label, diff, diverged=diverged, attachment=attachment, tied_to_code=edit.tied_to_code(kept.edited),
+            )
         source = kept.edited
         stem, suffix = edit.copy_name(item.title, diagram=item.is_diagram).rsplit(".", 1)
         attachment = self._attach(source, stem, f".{suffix}") if edit.needs_attachment(source) else None
-        return edit.text_prompt(clean(item.title), source, diagram=item.is_diagram, attachment=attachment)
+        return edit.text_prompt(
+            clean(item.title), source, diagram=item.is_diagram, attachment=attachment,
+            tied_to_code=edit.tied_to_code(source),
+        )
 
     # Point mode -----------------------------------------------------------------
 
@@ -1100,13 +1105,13 @@ class BlueprintApp(App[None]):
             if item.kind == "file" and item.path is not None:
                 return point.point_prompt(
                     described, text, lines=part.lines, line_text=line_text,
-                    file_label=edit.display_path(item.path, target.cwd),
+                    file_label=edit.display_path(item.path, target.cwd), code=part.code,
                 )
             stem, suffix = edit.copy_name(item.title, diagram=item.is_diagram).rsplit(".", 1)
             attachment = self._attach(shown, stem, f".{suffix}") if edit.needs_attachment(shown) else None
             return point.point_prompt(
                 described, text, lines=part.lines, line_text=line_text, title=clean(item.title),
-                diagram=item.is_diagram, source=shown, attachment=attachment,
+                diagram=item.is_diagram, source=shown, attachment=attachment, code=part.code,
             )
 
         self._send_request(Request(key, item, described, build, kept))

@@ -29,6 +29,16 @@ def test_blueprint_editor_comes_first():
     assert edit.editor_command(environ, which=which, system="posix") == ["/usr/bin/nvim"]
 
 
+def test_an_edit_of_a_design_tied_to_code_asks_for_the_code_change():
+    design = "graph LR\n  A[POST /token] --> B[verifyPkce]\n  %% code: B src/auth/pkce.ts:10\n"
+    assert edit.tied_to_code(design) and not edit.tied_to_code("graph LR\n  A --> B\n")
+    sent = edit.text_prompt("Token", design, diagram=True, tied_to_code=True)
+    assert "`%% code:`" in sent and "run the tests" in sent
+    changed = edit.file_prompt("docs/token.mmd", "-a\n+b\n", diverged=False, tied_to_code=True)
+    assert "`%% code:`" in changed and "run the tests" in changed
+    assert "run the tests" not in edit.file_prompt("docs/token.mmd", "-a\n+b\n", diverged=False)
+
+
 def test_no_editor_at_all():
     assert edit.editor_command({}, which=which_only(), system="posix") is None
 

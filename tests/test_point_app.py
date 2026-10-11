@@ -194,6 +194,19 @@ async def test_a_mouse_click_selects_the_node_under_it(tmp_path):
         assert app.pointing and app.selected == 2
 
 
+async def test_enter_on_a_box_tied_to_code_asks_for_a_code_change(tmp_path):
+    linked = FLOW + "  %% code: B src/tollgate.py:12\n"
+    prompter = FakePrompter()
+    app = make_app(tmp_path, prompter=prompter)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        await open_drawn(app, pilot, flow_file(tmp_path, linked))
+        await pilot.press("e", "l", "enter", *"cache it", "enter")
+        await wait_for(pilot, lambda: prompter.sent)
+        text = prompter.sent[0][1]
+        assert "It stands for `src/tollgate.py:12`." in text and "Make this change in the code" in text
+
+
 # --- diagrams inside a document ------------------------------------------------------
 
 async def test_j_walks_into_a_drawn_diagram_box_by_box_and_out_again(tmp_path):
