@@ -297,6 +297,21 @@ LINKED = (
 )
 
 
+def test_a_code_line_without_a_location_ties_nothing():
+    assert point.code_links("%% code: A\n%% code: B b.py:2\n") == {"B": "b.py:2"}
+
+
+@pytest.mark.parametrize("direction", ["TD", "LR", "RL"])
+def test_each_branch_gets_its_own_label(direction):
+    src = f"flowchart {direction}\n  A{{Check}} -->|no| B[One]\n  A -->|on| C[Two]\n"
+    text = draw(src)
+    branches = [p for p in point.diagram_parts(src, (4, 2, 4), text) if p.kind == "branch"]
+    labels = [p.boxes[0] for p in branches]
+    assert len(set(labels)) == 2
+    for part in branches:
+        assert "".join(cells(text, part.boxes[0])) in (part.label, part.label[::-1])
+
+
 def test_code_lines_tie_boxes_to_code():
     explained = "%% Blueprint: the code each box stands for (not drawn)\n%% code: A x.py:1\n"
     assert point.code_links(explained) == {"A": "x.py:1"}  # the explaining line is not a link
@@ -320,6 +335,10 @@ def test_a_part_tied_to_code_asks_for_a_code_change():
         code="src/auth/pkce.ts:10",
     )
     assert "Make this change in the code" in sent and "send the updated diagram to Blueprint" in sent
+    note = point.point_prompt(
+        'the box "A"', "x", lines=None, line_text="", title="Plan", diagram=False, source="# Plan", code="a.py:1",
+    )
+    assert "send the updated note to Blueprint" in note
     plain = point.point_prompt('the box "A"', "x", lines=None, line_text="", file_label="a.mmd")
     assert "Change it and anything it describes" in plain and "stands for" not in plain
 

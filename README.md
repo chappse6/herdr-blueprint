@@ -94,7 +94,9 @@ box by box too: `j` and `k` walk the document and step into it, `h` `j` `k` `l`
 move between its boxes, and going past its top or bottom leaves it. Click a
 part to select it. Press Enter, say what should change, and press Enter again:
 the agent next to Blueprint gets the part, where it is in the source and your
-note. Esc steps back.
+note. Esc steps back. While you type a note, whatever the agent sends waits
+until you close it, and a note you keep moves to the next version of the same
+diagram.
 
 When the agent draws the code it is building, it ties each box to that code
 with a comment Blueprint doesn't draw:
@@ -157,10 +159,11 @@ to pick it up. Undo with `herdr-blueprint uninstall-skill`.
 ## Token use
 
 Blueprint itself uses no tokens; the agent does when it writes what Blueprint
-shows. With the skill installed, the agent redraws its design after each unit
-of work (a feature piece, a fix, a change to the flow), but only while
-Blueprint is open: it first runs `status`, a short command, and draws nothing
-when Blueprint is closed.
+shows. The skill asks the agent to redraw its design after each unit of work
+(a feature piece, a fix, a change to the flow), but only while Blueprint is
+open: it first runs `status`, a short command, and draws nothing when Blueprint
+is closed. Agents load a skill when its description matches what they are
+doing; if yours doesn't redraw, press `a`.
 
 Rough figures, not measurements (they vary with the model, the language and the
 size of the diagram):
@@ -168,7 +171,8 @@ size of the diagram):
 | What | Tokens |
 |---|---|
 | One redraw: a summary, a diagram of 10 to 20 boxes, its `%% code:` lines | about 0.5k to 1.5k written; text in languages other than English takes more |
-| The check when Blueprint is closed | well under 100 |
+| The check when Blueprint is closed | about 100 written, plus one more step |
+| Loading the skill, once per session | about 2k read |
 | An hour with ten units of work | about 5k to 15k written |
 
 Each redraw is also one more step for the agent, which reads its conversation

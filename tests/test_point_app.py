@@ -327,6 +327,8 @@ async def test_a_redraw_keeps_the_box_selected(tmp_path):
         await wait_for(pilot, lambda: fence.drawing is not before)
         await pilot.pause()
         assert app.parts[app.selected].label == "Tollgate" and fence.shown.label == "Tollgate"
+        # ...and it is still drawn highlighted.
+        assert any("reverse" in repr(span.style) for span in fence._highlighted_code.spans)
 
 
 async def test_e_on_a_box_in_a_document_opens_the_editor_on_its_line(tmp_path):
@@ -376,7 +378,8 @@ async def test_escape_steps_back_from_the_note_then_leaves(tmp_path):
         assert not app.pointing
 
 
-async def test_a_send_while_pointing_ends_it_and_keeps_the_note(tmp_path):
+async def test_a_send_while_typing_a_note_waits_until_the_note_closes(tmp_path):
+    # The agent redraws after each piece of work; it must not swap the screen mid-sentence.
     app = make_app(tmp_path)
     path = flow_file(tmp_path)
     async with app.run_test(size=(100, 30)) as pilot:
@@ -385,11 +388,49 @@ async def test_a_send_while_pointing_ends_it_and_keeps_the_note(tmp_path):
         await pilot.press("e", "l", "enter")
         await pilot.press(*"rename it")
         inbox.send({"kind": "text", "source": "# Other", "title": "Other"})
+        await pilot.pause(0.6)
+        assert app.current.title == "flow.mmd" and app.query_one(NoteLine).value == "rename it"
+        await pilot.press("escape")  # the note is kept; now the send shows
         await wait_for(pilot, lambda: app.current and app.current.title == "Other")
         assert not app.pointing and not app.query(NoteLine)
         await open_drawn(app, pilot, path)
         await pilot.press("e", "l", "enter")
         assert app.query_one(NoteLine).value == "rename it"
+
+
+async def test_a_kept_note_moves_to_the_next_version_of_the_same_note(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(0.3)
+        await app.open_item(Item(kind="mermaid", title="Token flow", source=FLOW, draw=True))
+        view = app.query_one(DiagramView)
+        await wait_for(pilot, lambda: view.drawing is not None)
+        await pilot.press("e", "l", "enter", *"cache it", "escape", "escape")
+        inbox.send({"kind": "mermaid", "source": FLOW + "  C --> D[Disk]\n", "title": "Token flow", "draw": True})
+        await wait_for(pilot, lambda: app.current.source != FLOW)
+        assert "dropped" not in (app.notice or "")
+        view = app.query_one(DiagramView)
+        await wait_for(pilot, lambda: view.drawing is not None)
+        await pilot.press("e", "l", "enter")
+        assert app.query_one(NoteLine).value == "cache it"
+
+
+async def test_a_note_open_on_a_diagram_block_keeps_its_target_when_the_drawing_lands(tmp_path):
+    prompter = FakePrompter()
+    app = make_app(tmp_path, prompter=prompter)
+    async with app.run_test(size=(100, 50)) as pilot:
+        await pilot.pause()
+        fence = await open_fenced(app, pilot, tmp_path)
+        drawing, fence.drawing = fence.drawing, None  # as if termaid were still drawing
+        await pilot.press("e", "j", "j")
+        assert app.parts[app.selected].kind == "diagram"
+        await pilot.press("enter", *"redo it")
+        fence.drawing = drawing
+        fence.post_message(DiagramFence.Drawn(fence))
+        await pilot.pause()
+        await pilot.press("enter")
+        await wait_for(pilot, lambda: prompter.sent)
+        assert "the diagram block" in prompter.sent[0][1]
 
 
 async def test_document_blocks_walk_with_j_and_k_and_ask_with_lines(tmp_path):

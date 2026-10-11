@@ -44,15 +44,34 @@ flowchart TD
 
 | On screen | Parts |
 |---|---|
-| A flowchart (`graph`, `flowchart`) or `stateDiagram`, drawn on its own | each node |
-| A `sequenceDiagram` drawn on its own | each participant, each message |
-| Any other diagram, a diagram shown as text, a diagram inside a document | the whole diagram |
-| A Markdown document | each top-level block: heading, paragraph, list, table, quote, code or diagram block |
+| A flowchart (`graph`, `flowchart`) or `stateDiagram`, drawn | each node, and each branch: a labelled arrow, or any arrow out of a node with more than one |
+| A `sequenceDiagram`, drawn | each participant, each message |
+| Any other diagram, a diagram shown as text | the whole diagram |
+| A Markdown document | each top-level block: heading, paragraph, list, table, quote, code or diagram block; a drawn diagram block is pointed at part by part, as above |
 | The welcome or start screen, a large file in plain view | nothing; `e` stays hidden |
 
-The selected part is shown in reverse video: the node's box, the participant's
-box, the message's label and arrow rows, or the document block's background.
-Moving the selection scrolls it into view, sideways too.
+The selected part is shown in reverse video: the node's box, a branch's label
+and path, the participant's box, the message's label and arrow rows, or the
+document block's background. Moving the selection scrolls it into view, sideways
+too.
+
+Moving follows the screen and the arrows (added 2026-10-11): sideways reaches
+parts on the same rows, up and down parts in the same columns, and parts an
+arrow joins to the current one count wherever they are. A branch is measured
+from its last run into its target. In a document, `j` and `k` walk the blocks
+and step into a drawn diagram; going past its top or bottom leaves it. `g`/`G`
+pick the first/last part and `ctrl+d`/`ctrl+u` move half a screen.
+
+### Parts tied to code
+
+A diagram can tie a part to the code it stands for with a Mermaid comment at
+its end: `%% code: <id> <path>:<line>` (a branch is `A->B`, a message
+`message-N`; a branch without its own line takes its source node's). The
+request for such a part is a work order: it adds "It stands for `<path>:<line>`"
+and asks the agent to make the change in that code, run the tests and redraw.
+An edit of a diagram with code lines asks for the same. The skill has the agent
+draw the code it is building this way, and redraw after each unit of work while
+`herdr-blueprint status` says a viewer is open.
 
 ### Where the parts come from
 
@@ -103,8 +122,10 @@ the table under "Steps", the whole diagram.
 Sending works exactly as in the edit design: an agent next to Blueprint gets the
 request; a shell there gets an offer to start one; otherwise the note is kept.
 A kept note fills the note line again the next time Enter is pressed on that
-document. The header says "Asking claude…", then
-"Asked claude about the box "Tollgate"". Point mode is locked while asking.
+part, also on the next version of the same note the agent sends. Sends that
+arrive while the note line is open wait until it closes. The header says
+"Asking claude…", then "Asked claude about the box "Tollgate"". Point mode is
+locked while asking.
 
 ## Editing the text (second step)
 
@@ -131,8 +152,8 @@ sight, and Blueprint redraws it from the copy every time the editor saves.
 
 ## Out of scope for now
 
-Edges, nodes inside diagrams that sit in a document, part-level pointing in
-other diagram types, selecting several parts at once.
+Part-level pointing in other diagram types (class, ER, ...), subgraph boxes as
+parts, selecting several parts at once.
 
 ## Parts
 

@@ -204,13 +204,14 @@ class AgentPicker(ModalScreen[str | None]):
         Binding("k", "cursor(-1)", show=False),
     ]
 
-    def __init__(self, kinds: list[str]) -> None:
+    def __init__(self, kinds: list[str], what: str = "edit") -> None:
         super().__init__()
         self.kinds = kinds
+        self.what = what
 
     def compose(self) -> ComposeResult:
         with Vertical(id="agents"):
-            yield Static("Start an agent next to Blueprint and send your edit?", id="agents-title")
+            yield Static(f"Start an agent next to Blueprint and send your {self.what}?", id="agents-title")
             options = [Option(f"Start {kind}", id=kind) for kind in self.kinds]
             yield OptionList(*options, Option("Don't send", id=""))
             yield Static("j/k move   ⏎ choose   esc don't send", id="agents-hint")
@@ -290,6 +291,7 @@ class BlueprintApp(App[None]):
         Binding("ctrl+u", "page(-1)", show=False),
         # Only offered when there is something to point at; e again edits the text.
         Binding("e", "edit", "Edit"),
+        Binding("e", "edit_text", "Edit text"),  # while pointing: edit the text at the part
         # Point mode only.
         Binding("enter", "point_ask", "Ask", key_display="⏎"),
         Binding("escape", "point_done", "Done", key_display="esc"),
@@ -342,7 +344,8 @@ class BlueprintApp(App[None]):
         self._focus_pane = focus_pane or (lambda pane_id: pane.focus_plugin_pane(herdr, pane_id))
         self._pane_alive = pane_alive or (lambda pane_id: pane.pane_exists(herdr, pane_id))
         self._live: LiveEdit | None = None
-        self._held: Item | None = None  # the newest send that arrived during a live edit
+        self._held: Item | None = None  # the newest send that arrived during a live edit or a note
+        self._noting = False  # the note line is open: sends wait for it
         self.preview_text: str | None = None  # what the live preview shows
         # Unsent edits, one per document; the next `e` on that document reopens it.
         self._kept: dict[tuple, KeptEdit] = {}
@@ -418,13 +421,27 @@ class BlueprintApp(App[None]):
         if self._live is not None:
             self._held = item  # shown, or dropped, when the editor closes
             return
+        if self._noting:
+            # The agent redraws after each piece of work; never swap the screen mid-sentence.
+            self._held = item
+            self._show_notice("An update is waiting; it shows when you close the note", ok=True)
+            return
         async with self._render_lock:
             await self._open_locked(item)
+
+    def _release_held(self) -> None:
+        """The note line closed: show the send that waited for it."""
+        if self._held is not None and self._live is None and not self._noting:
+            item, self._held = self._held, None
+            self.run_worker(self.open_item(item), group="open", exit_on_error=False)
 
     async def refresh_current(self, draw: bool) -> None:
         """Re-read and redraw what is on screen, with the worker's draw flag."""
         if self._live is not None:
             return  # the editor is open on what is shown
+        if self._noting and self.current is not None:
+            self._held = self._held or replace(self.current, draw=draw, at=time.time())
+            return
         # Read `current` under the lock, so a send in progress is not undone.
         async with self._render_lock:
             if self.current is not None:
@@ -432,6 +449,7 @@ class BlueprintApp(App[None]):
 
     async def _open_locked(self, item: Item) -> bool:
         """Show `item`; True when that dropped unsent work kept for sent text."""
+        previous = self.current
         if self.pointing:
             self._end_point()  # a send replaces the screen; a typed note is kept
         try:
@@ -461,7 +479,14 @@ class BlueprintApp(App[None]):
         self._shown_key = doc_key(item)
         dropped = []
         if previous_key and previous_key[0] == "text" and previous_key != self._shown_key and not self._sending:
-            # Sent text can't be shown again, so work kept for it can't be picked up.
+            # Sent text can't be shown again, so work kept for it can't be picked up. A new
+            # version of the same note (the agent redraws as it works) takes its notes over;
+            # an edit is dropped all the same: sending it would undo the agent's update.
+            newer = previous is not None and item.kind != "file" and bool(item.title) and item.title == previous.title
+            for key, kept in list(self._kept.items()):
+                if newer and isinstance(kept, KeptNote) and doc_key(kept.item) == previous_key:
+                    del self._kept[key]
+                    self._kept[(self._shown_key, kept.part_id)] = replace(kept, item=item)
             dropped = [key for key, kept in self._kept.items() if doc_key(kept.item) == previous_key]
             for key in dropped:
                 title = self._kept.pop(key).item.title
@@ -534,7 +559,9 @@ class BlueprintApp(App[None]):
         if action == "open_file":
             return bool(self.source and self.source.cwd)
         if action == "edit":
-            return self._editable()
+            return not self.pointing and self._editable()
+        if action == "edit_text":
+            return self.pointing and self._editable()
         return True
 
     async def action_leave(self) -> None:
@@ -617,6 +644,9 @@ class BlueprintApp(App[None]):
         """Point mode needs the document itself on screen, not an edit's preview."""
         return self._live is None and self.preview_text is None and self._editable()
 
+    def action_edit_text(self) -> None:
+        self.action_edit()
+
     def action_edit(self) -> None:
         """First e points at a part; e while pointing edits the text there."""
         if self._live is not None:
@@ -671,7 +701,7 @@ class BlueprintApp(App[None]):
         key = doc_key(item)
         if not saved:
             # :q! keeps whatever was waiting; nothing is sent.
-            self._show_notice("Not saved. Your edit is kept; press e to edit it again" if kept else "No changes")
+            self._show_notice("Not saved. Your edit is kept; press e twice to edit it again" if kept else "No changes")
             return False
         if kept and not edited.strip():
             del self._kept[key]
@@ -784,7 +814,7 @@ class BlueprintApp(App[None]):
         if closed:
             if saved and not edit.same_text(edited, live.base):
                 self._kept[doc_key(live.item)] = KeptEdit(live.item, live.base, live.base_bytes, edited)
-                self._show_notice("The editor closed. Your saved changes are kept; press e to send them")
+                self._show_notice("The editor closed. Your saved changes are kept; press e twice to send them")
             else:
                 self._show_notice("The editor closed")
         elif code == 127:
@@ -866,7 +896,8 @@ class BlueprintApp(App[None]):
     def _send_request(self, request: Request) -> None:
         self._sending = True
         self.refresh_bindings()
-        self._show_notice("Sending your edit…" if request.is_edit else "Asking…", ok=True)
+        agent = self.source.agent if self.source and self.source.agent else None
+        self._show_notice("Sending your edit…" if request.is_edit else f"Asking {agent or 'the agent'}…", ok=True)
         self.run_worker(lambda: self._deliver(request), thread=True, group="edit", exit_on_error=False)
 
     def _deliver(self, request: Request) -> None:
@@ -899,7 +930,7 @@ class BlueprintApp(App[None]):
                 lambda: self._start_and_send(request, fresh, kind), thread=True, group="edit", exit_on_error=False,
             )
 
-        self.push_screen(AgentPicker(kinds), chosen)
+        self.push_screen(AgentPicker(kinds, "edit" if request.is_edit else "note"), chosen)
 
     def _start_and_send(self, request: Request, fresh: pane.Source, kind: str) -> None:
         try:
@@ -934,11 +965,12 @@ class BlueprintApp(App[None]):
         elif here and not request.is_edit:
             self._show_notice(f"{clean(message)}. Your note was kept; point at it and press Enter to send it again")
         elif here:
-            self._show_notice(f"{clean(message)}. Your edit was not sent; press e to edit it again")
+            again = "press e" if self.preview_text is not None else "press e twice"  # a preview edits on the first e
+            self._show_notice(f"{clean(message)}. Your edit was not sent; {again} to edit it again")
         elif doc_key(request.item)[0] == "file":
             where = clean(request.item.title)
             if request.is_edit:
-                self._show_notice(f"{clean(message)}. Your edit was not sent; open {where} again and press e")
+                self._show_notice(f"{clean(message)}. Your edit was not sent; open {where} again and press e twice")
             else:
                 self._show_notice(f"{clean(message)}. Your note was kept; open {where} again, point at it and press Enter")
         else:
@@ -1042,6 +1074,7 @@ class BlueprintApp(App[None]):
             if keep_note:
                 self._keep_note(notes.first().value)
             notes.remove()
+        self._noting = False
         self.pointing = False
         for view in self.query(DiagramView):
             view.show(None)
@@ -1071,6 +1104,7 @@ class BlueprintApp(App[None]):
             return
         kept = self._kept.get(self._note_key())
         note = NoteLine(kept.text if isinstance(kept, KeptNote) else "")
+        self._noting = True
         self.mount(note, before=self.query_one(Footer))
         note.focus()
 
@@ -1081,6 +1115,11 @@ class BlueprintApp(App[None]):
             self._keep_note(notes.first().value)
             notes.remove()
         self.set_focus(None)
+        self._noting = False
+        if self._held is not None:
+            self._release_held()
+        else:
+            self._refresh_parts()  # a diagram drawn while the note was open
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if not isinstance(event.input, NoteLine):
@@ -1115,6 +1154,7 @@ class BlueprintApp(App[None]):
             )
 
         self._send_request(Request(key, item, described, build, kept))
+        self._release_held()
 
     def action_point_done(self) -> None:
         if self.query(NoteLine):
@@ -1133,6 +1173,8 @@ class BlueprintApp(App[None]):
     def _refresh_parts(self) -> None:
         """A (re)drawn diagram can change the layout: find the parts again, keeping the selection.
         A block that got drawn meanwhile keeps it on its first box, and the other way round."""
+        if self._noting:
+            return  # the note is about the part selected now; recomputed when it closes
         chosen = self.parts[self.selected].id if self.parts else ""
         self.parts = self._compute_parts()
         if not self.parts:

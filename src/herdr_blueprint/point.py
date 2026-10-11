@@ -17,7 +17,7 @@ from rich.style import Style
 from rich.text import Text
 
 # `%% code: <id> <where>`: a Mermaid comment tying a box to the code it stands for.
-_CODE_LINE = re.compile(r"^\s*%%\s*code:\s*(\S+)\s+(.+?)\s*$", re.MULTILINE)
+_CODE_LINE = re.compile(r"^[ \t]*%%[ \t]*code:[ \t]*(\S+)[ \t]+(\S.*?)[ \t]*$", re.MULTILINE)
 # Message arrows in a sequence diagram source line.
 _ARROW = re.compile(r"^\s*[^%].*?(-{1,2}>>|-{1,2}>|-{1,2}x|-{1,2}\))")
 
@@ -193,29 +193,36 @@ def _segments(points: list[tuple[int, int]]) -> list[Box]:
 
 
 def _with_labels(parts: list[Part], text: Text) -> list[Part]:
-    """Branches with the drawn label in front: it is what the selection starts from."""
+    """Branches with the drawn label in front: it is what the selection starts from.
+
+    Every place a label is drawn is a candidate; whole words beat parts of longer
+    text, then the nearest to the branch's path wins, and no place goes to two
+    branches ("no" and "on" mirrored, say).
+    """
     rows = text.plain.split("\n")
     nodes = [box for part in parts if part.kind == "node" for box in part.boxes]
-    placed = []
-    for part in parts:
+    choices = []  # (partial, distance, part index, box)
+    for index, part in enumerate(parts):
         if part.kind != "branch" or not part.label or not part.boxes:
-            placed.append(part)
             continue
         path = [(x, y) for box in part.boxes for y in range(box.y, box.y + box.height) for x in range(box.x, box.x + box.width)]
-        found = []
         for y, row in enumerate(rows):
             for candidate in {part.label, part.label[::-1]}:  # termaid 0.9.0 mirrors RL labels
                 start = row.find(candidate)
                 while start != -1:
+                    end = start + len(candidate)
                     box = Box(cell_len(row[:start]), y, cell_len(candidate), 1)
                     if not any(node.contains(box.x, box.y) for node in nodes):
-                        found.append(box)
+                        partial = (start > 0 and row[start - 1].isalnum()) or (end < len(row) and row[end].isalnum())
+                        distance = min(max(box.x - x, 0, x - (box.x + box.width - 1)) + abs(box.y - y) for x, y in path)
+                        choices.append((partial, distance, index, box))
                     start = row.find(candidate, start + 1)
-
-        def distance(box: Box) -> int:
-            return min(max(box.x - x, 0, x - (box.x + box.width - 1)) + abs(box.y - y) for x, y in path)
-
-        placed.append(replace(part, boxes=(min(found, key=distance), *part.boxes)) if found else part)
+    placed, taken = list(parts), set()
+    for _partial, _distance, index, box in sorted(choices, key=lambda c: (c[0], c[1], c[2])):
+        if box in taken or placed[index] is not parts[index]:
+            continue
+        taken.add(box)
+        placed[index] = replace(parts[index], boxes=(box, *parts[index].boxes))
     return placed
 
 
@@ -521,7 +528,7 @@ def point_prompt(
         return f"In Blueprint I pointed at {described} in `{file_label}`{where}.{stands}\n{note}\n{todo}\n"
     what = "diagram" if diagram else "note"
     body = f"Its source is in `{attachment}`." if attachment else fenced(source or "", "mermaid" if diagram else "markdown")
-    todo = f"{work}send the updated diagram to Blueprint." if code else (
+    todo = f"{work}send the updated {what} to Blueprint." if code else (
         "Change it and anything it describes, then send the new version to Blueprint."
     )
     return f"In Blueprint I pointed at {described} in the {what} you sent ('{title}'){where}.{stands}\n{note}\n{todo}\n{body}\n"

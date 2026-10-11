@@ -36,7 +36,8 @@ packages = ["src/herdr_blueprint"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-# A stuck test fails with every thread's stack instead of hanging the run (and CI).
+# A stuck test fails with its traceback instead of hanging the run (and CI). On
+# Windows pytest-timeout ends the whole run instead, after printing every stack.
 timeout = 60
 
 [tool.uv]

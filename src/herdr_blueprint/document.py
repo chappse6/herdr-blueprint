@@ -61,7 +61,7 @@ class DiagramFence(MarkdownFence):
             self._highlighted_code = Content(PLACEHOLDER)
 
     class Drawn(Message):
-        """A new drawing is on screen (first draw, theme change, resize)."""
+        """A new drawing is on screen (first draw, theme change)."""
 
         def __init__(self, fence: "DiagramFence") -> None:
             super().__init__()
@@ -101,6 +101,9 @@ class DiagramFence(MarkdownFence):
 
     def _show(self, drawing: Drawing | None, content: Content) -> None:
         self.drawing = drawing
+        if drawing is not None and self.shown is not None:
+            # Redrawn while pointing (a theme change): keep the selection highlighted.
+            content = Content.from_rich_text(highlight(drawing.text, self.shown, Style(reverse=True)))
         self._highlighted_code = content
         self.set_content(content)
         self.post_message(self.Drawn(self))

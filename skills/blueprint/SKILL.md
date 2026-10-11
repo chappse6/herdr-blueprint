@@ -1,6 +1,6 @@
 ---
 name: blueprint
-description: Use when running inside a herdr pane (HERDR_ENV=1) with the Blueprint plugin and a diagram or document would explain things better than chat text — architecture, request flows, sequences, data models, state machines — or when the user asks to "draw", "show a diagram", "visualize", "explain this in Blueprint", "open this in Blueprint", or "refresh Blueprint".
+description: Use when running inside a herdr pane (HERDR_ENV=1) with the Blueprint plugin, after finishing a unit of coding work (to redraw the code you are building while Blueprint is open), when a prompt says "In Blueprint I pointed at" or "I edited ... in Blueprint", and when a diagram or document would explain things better than chat text — architecture, request flows, sequences, data models, state machines — or when the user asks to "draw", "show a diagram", "visualize", "explain this in Blueprint", "open this in Blueprint", or "refresh Blueprint".
 ---
 
 # Blueprint
@@ -133,7 +133,8 @@ flowchart TD
 
 - A labelled arrow is a branch the user can point at; without its own line it
   stands for its branch node's code. Give it one (`%% code: V->E path:line`)
-  when that branch lives somewhere else.
+  when that branch lives somewhere else. In a `sequenceDiagram`, messages are
+  `message-1`, `message-2`... in order.
 - Only locations you have seen. Leave a box without a line rather than guess.
 
 ## When asked to explain a feature
@@ -152,6 +153,8 @@ Markdown with `--draw`, in the user's language:
 - Keep the title short; it shows in the header.
 - Plain Mermaid works best: `graph`/`flowchart`, `sequenceDiagram`, `erDiagram`,
   `classDiagram`, `stateDiagram-v2`. Keep diagrams under about 100 nodes.
+- Use `TD` or `LR`: the drawing mirrors the text of `RL` diagrams and flips
+  arrows in `BT` ones.
 - Labels are plain text: no `<br/>` or other HTML, which breaks the node.
 - The side pane is narrow, about 100 columns. Keep a `sequenceDiagram` to four
   participants and every message or edge label to about 20 characters
