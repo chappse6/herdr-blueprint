@@ -169,6 +169,48 @@ def tied_to_code(text: str) -> bool:
     return bool(code_links(text))
 
 
+_MERMAID_FENCE = re.compile(r"^\s*(`{3,}|~{3,})\s*mermaid\b")
+
+
+def _code_blocks(lines: list[str]) -> list[tuple[int, int]]:
+    """Line ranges [start, end) of the Mermaid blocks that have `%% code:` lines."""
+    blocks, i = [], 0
+    while i < len(lines):
+        opened = _MERMAID_FENCE.match(lines[i])
+        if not opened:
+            i += 1
+            continue
+        mark = opened.group(1)
+        end = next(
+            (j for j in range(i + 1, len(lines)) if lines[j].strip().startswith(mark[0] * len(mark)) and not lines[j].strip().strip(mark[0])),
+            len(lines) - 1,
+        )
+        if tied_to_code("\n".join(lines[i + 1:end])):
+            blocks.append((i, end + 1))
+        i = end + 1
+    return blocks
+
+
+def touches_code(base: str, edited: str, *, diagram: bool) -> bool:
+    """Whether an edit changes a diagram tied to code: any change to a diagram that has
+    `%% code:` lines, or in a document, a change inside a Mermaid block that has them."""
+    if diagram:
+        return tied_to_code(base) or tied_to_code(edited)
+    before, after = _lines(base), _lines(edited)
+    old_blocks, new_blocks = _code_blocks(before), _code_blocks(after)
+    if not (old_blocks or new_blocks):
+        return False
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, before, after, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        # A deletion still happened somewhere: count the line it happened at.
+        if any(s <= n < e for n in range(i1, max(i2, i1 + 1)) for s, e in old_blocks):
+            return True
+        if any(s <= n < e for n in range(j1, max(j2, j1 + 1)) for s, e in new_blocks):
+            return True
+    return False
+
+
 # An edit of a diagram tied to code is a work order on that code.
 CODE_WORK = "make the change in the code its `%% code:` lines point to, run the tests, then "
 

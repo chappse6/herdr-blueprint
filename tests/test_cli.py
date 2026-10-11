@@ -243,3 +243,10 @@ def test_status_says_whether_a_viewer_is_open(monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == "open"
     alive.clear()  # closed without cleanup
     assert cli.main(["status"]) == 1
+
+
+def test_help_lists_only_the_commands_people_use(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    out = capsys.readouterr().out
+    assert "edit-session" not in out and "SUPPRESS" not in out and "status" in out

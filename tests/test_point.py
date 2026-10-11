@@ -478,3 +478,17 @@ def test_labels_are_one_line_of_plain_text():
 def test_a_quoted_line_keeps_its_backticks():
     text = point.point_prompt("the box", "x", lines=(3, 3), line_text="a ``b`` c", file_label="a.md")
     assert "line 3: ``` a ``b`` c ```." in text
+
+
+def test_up_and_down_go_to_the_next_row_when_nothing_is_straight_that_way():
+    parts = point.diagram_parts(FLOWING, (4, 2, 4), draw(FLOWING))
+    ids = [p.id for p in parts]
+    start = ids.index("OK->KEEP")
+    above = point.nearest(parts, start, "up")
+    assert above != start and point.anchor(parts[above])[1] < point.anchor(parts[start])[1]
+    lonely = "graph TD\n  A[Top] --> B[Low]\n  D[Alone]\n"
+    loose = point.diagram_parts(lonely, (4, 2, 4), draw(lonely))
+    names = [p.id for p in loose]
+    assert point.nearest(loose, names.index("A"), "down") == names.index("B")
+    # Sideways stays strict: nothing on the row, no move.
+    assert point.nearest(parts, ids.index("K"), "right") == ids.index("K")

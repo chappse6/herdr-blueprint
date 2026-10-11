@@ -226,3 +226,15 @@ def test_an_editor_that_cannot_start_leaves_127(tmp_path):
     env = {edit.SESSION_COPY: str(copy), edit.SESSION_COMMAND: json.dumps(["nope"])}
     edit.run_session(env, run=run)
     assert edit.exit_file(copy).read_text() == "127"
+
+
+def test_only_edits_of_a_diagram_tied_to_code_are_work_orders():
+    doc = "# Token\n\nIntro.\n\n```mermaid\ngraph LR\n  A --> B\n  %% code: A src/a.py:1\n```\n"
+    assert not edit.touches_code(doc, doc.replace("# Token", "# Tokens"), diagram=False)
+    assert edit.touches_code(doc, doc.replace("A --> B", "A --> C"), diagram=False)
+    assert edit.touches_code(doc, doc.replace("```mermaid\ngraph LR\n  A --> B\n  %% code: A src/a.py:1\n```\n", ""), diagram=False)
+    plain = "```\n%% code: A x.py:1\n```\n"  # not a Mermaid block
+    assert not edit.touches_code(plain, plain + "more\n", diagram=False)
+    mmd = "graph LR\n  A --> B\n  %% code: A a.py:1\n"
+    assert edit.touches_code(mmd, mmd.replace("--> B", "--> C"), diagram=True)
+    assert not edit.touches_code("graph LR\n  A --> B\n", "graph LR\n  A --> C\n", diagram=True)

@@ -993,14 +993,15 @@ class BlueprintApp(App[None]):
             stem = edit.copy_name(item.path.name, diagram=False).removesuffix(".md")
             attachment = self._attach(diff, stem, ".diff") if edit.needs_attachment(diff) else None
             return edit.file_prompt(
-                label, diff, diverged=diverged, attachment=attachment, tied_to_code=edit.tied_to_code(kept.edited),
+                label, diff, diverged=diverged, attachment=attachment,
+                tied_to_code=edit.touches_code(kept.base, kept.edited, diagram=item.is_diagram),
             )
         source = kept.edited
         stem, suffix = edit.copy_name(item.title, diagram=item.is_diagram).rsplit(".", 1)
         attachment = self._attach(source, stem, f".{suffix}") if edit.needs_attachment(source) else None
         return edit.text_prompt(
             clean(item.title), source, diagram=item.is_diagram, attachment=attachment,
-            tied_to_code=edit.tied_to_code(source),
+            tied_to_code=edit.touches_code(kept.base, source, diagram=item.is_diagram),
         )
 
     # Point mode -----------------------------------------------------------------

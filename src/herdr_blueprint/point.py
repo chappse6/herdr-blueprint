@@ -462,8 +462,9 @@ def _span(part: Part, sideways: bool) -> tuple[int, int]:
 def nearest(parts: list[Part], current: int, direction: str) -> int:
     """The part closest to `current` in `direction` (left, right, up, down), or `current`.
 
-    Moving sideways only reaches parts on the same rows, up or down only parts in the
-    same columns, so nothing that way means no move. Parts an arrow joins to `current`
+    Moving sideways only reaches parts on the same rows, so nothing that way means no
+    move. Up or down prefers parts in the same columns; with none, it goes to the
+    nearest part on the next row, like reading. Parts an arrow joins to `current`
     count wherever they are (sibling branches within 45 degrees), and being off to the
     side costs them less.
     """
@@ -473,12 +474,15 @@ def nearest(parts: list[Part], current: int, direction: str) -> int:
     sideways = direction in ("left", "right")
     low, high = _span(parts[current], sideways)
     best, best_score = current, float("inf")
+    next_row, next_row_score = current, (float("inf"), float("inf"))
     for i, part in enumerate(parts):
         if i == current or not part.boxes:
             continue
         x, y = anchor(part)
         dx, dy = x - cx, y - cy
         ahead, aside = {"right": (dx, dy), "left": (-dx, dy), "down": (dy, dx), "up": (-dy, dx)}[direction]
+        if ahead > 0.5 and not sideways and (ahead, abs(aside)) < next_row_score:
+            next_row, next_row_score = i, (ahead, abs(aside))
         link = _link(parts[current], part)
         start, end = _span(part, sideways)
         if ahead <= 0.5 or not (link or (start <= high and low <= end)):
@@ -489,7 +493,7 @@ def nearest(parts: list[Part], current: int, direction: str) -> int:
         score = ahead + (0.5 if link else 2) * abs(aside)
         if score < best_score:
             best, best_score = i, score
-    return best
+    return best if best != current else next_row
 
 
 def highlight(text: Text, part: Part, style: Style) -> Text:

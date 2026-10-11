@@ -75,7 +75,10 @@ def _parser() -> argparse.ArgumentParser:
         prog="herdr-blueprint",
         description="Live Markdown and Mermaid viewer for the herdr side pane.",
     )
-    commands = parser.add_subparsers(dest="command")
+    # The metavar lists the commands people use; edit-session runs inside Blueprint's editor pane.
+    commands = parser.add_subparsers(
+        dest="command", metavar="{show,send,refresh,open,status,install-skill,uninstall-skill}",
+    )
     show = commands.add_parser("show", help="show a Markdown or Mermaid file in the viewer")
     show.add_argument("path", type=Path)
     show.add_argument("--draw", action="store_true", help=DRAW_HELP)
@@ -86,7 +89,7 @@ def _parser() -> argparse.ArgumentParser:
     refresh.add_argument("--draw", action="store_true", help=DRAW_HELP)
     commands.add_parser("open", help="open the viewer pane in herdr")
     commands.add_parser("status", help="print open or closed: whether a viewer is open (exit 0 when open)")
-    commands.add_parser("edit-session", help=argparse.SUPPRESS)
+    commands.add_parser("edit-session")  # no help: left out of the command list
     commands.add_parser("install-skill", help="add the Blueprint skill to Claude Code and Codex")
     commands.add_parser("uninstall-skill", help="remove the Blueprint skill")
     return parser
