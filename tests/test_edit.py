@@ -62,7 +62,8 @@ def test_an_editor_path_with_home_or_a_plain_file_works(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))  # what ~ means on Windows
     nowhere = which_only()
     assert edit.editor_command({"EDITOR": "~/bin/myvim -n"}, which=nowhere, system="posix") == [str(program), "-n"]
-    assert edit.editor_command({"EDITOR": str(program)}, which=nowhere, system="posix") == [str(program)]
+    # A plain path, read the way this system reads it (Windows keeps its backslashes).
+    assert edit.editor_command({"EDITOR": str(program)}, which=nowhere) == [str(program)]
 
 
 def test_notepad_is_the_windows_last_resort():
