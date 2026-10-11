@@ -21,6 +21,21 @@
   <sub>Ask your agent to explain something. Blueprint draws it next to the chat. (<a href="docs/screenshots/herdr-demo.mp4">MP4</a>)</sub>
 </p>
 
+## Why
+
+Coding agents explain their work in long chat messages. To see what is being
+built, you read a wall of text. To change one part, you first describe where it
+is.
+
+Blueprint fixes both ends.
+
+- **See it at a glance.** The agent draws what it is building, its flow and its
+  branches, next to the chat, and keeps the drawing current as it works.
+- **Ask where you look.** Point at a box and write "add rate limiting here". The
+  agent gets that part, the code behind it, and your note.
+
+## What it is
+
 Blueprint is a [herdr](https://herdr.dev) plugin. Put it next to your coding
 agent and it shows one thing: the latest doc or diagram the agent sent, drawn
 in your terminal with colors that match your theme.
@@ -32,13 +47,14 @@ in your terminal with colors that match your theme.
 - **Work orders on code.** When the agent ties boxes to its code, your note
   becomes a change to that code: made, tested, and drawn again.
 - **Kept current.** With the skill, the agent redraws the code it is building
-  after each unit of work, while Blueprint is open.
+  after each unit of work, while Blueprint is open, and the header says when
+  the code behind a drawing changed since it was drawn.
 - **Draw on request.** Mermaid is drawn with [termaid](https://github.com/fasouto/termaid)
   when the sender adds `--draw`; otherwise it stays as clean text. The agent
   (or `r`) redraws what is on screen.
-- **Knows its neighbor.** Opened next to an agent, it shows the agent, its task
-  and folder. Press `a` to ask the agent to draw its task, or `o` to open a doc
-  from that folder.
+- **Knows its neighbor.** Opened next to an agent, it asks the agent to draw
+  what it is doing (once it is free). Press `a` to ask again, or `o` to open a
+  doc from the agent's folder.
 - **Themes.** Press `t` to pick a theme. Only your theme is saved.
 - **Runs everywhere.** macOS, Linux and Windows. No browser, no images.
 
@@ -48,8 +64,9 @@ in your terminal with colors that match your theme.
 
 ## Next to your agent
 
-Opened next to an agent, Blueprint starts with what it can do there: ask the
-agent to draw its task (`a`), or open a doc from its folder (`o`).
+Opened next to an agent, Blueprint shows who is there and asks the agent to
+draw what it is doing; a busy agent is asked when it finishes. Press `a` to ask
+again, or `o` to open a doc from its folder.
 
 <p align="center">
   <img src="docs/screenshots/start-screen.png" width="49%" alt="Start screen showing the agent next to Blueprint, its task and folder">
@@ -86,6 +103,7 @@ description = "open Blueprint"
 | `ctrl+d` `ctrl+u` | Half a page down, up (pointing: the selection moves) |
 | `e` | Point at a part (pointing: edit the text at it) |
 | `Enter` | Pointing: write a note about the part and send it |
+| `c` | Pointing at a part tied to code: open that code in your editor |
 | `Esc` | Pointing: close the note, then stop pointing |
 | `a` | Ask the agent next to Blueprint to draw its task |
 | `o` | Open a Markdown or Mermaid file from that pane's folder |
@@ -127,7 +145,8 @@ flowchart TD
 
 Point at such a box (or one of its branches), write "return 401 when the code
 expired", and the request is a work order: the agent changes the code at
-`src/auth/pkce.ts:10`, runs the tests, and redraws the design.
+`src/auth/pkce.ts:10`, runs the tests, and redraws the design. To read that code
+yourself, press `c`: it opens in your editor at that line.
 
 To change the text yourself, press `e` again while pointing. Your editor
 (`$BLUEPRINT_EDITOR`, `$VISUAL`, `$EDITOR`, else vim, vi or nano) opens on that
@@ -156,8 +175,8 @@ herdr-blueprint status                            # open or closed
 `--draw` makes Blueprint draw Mermaid. Without it, diagrams show as text, which
 is faster. Each send or refresh carries its own flag.
 
-The command lives in the plugin's own environment. From an agent, run it
-through the plugin folder:
+`herdr-blueprint` is on your `PATH` once the skill is installed (see below; it
+goes in `~/.local/bin`). Without it, run the command through the plugin folder:
 
 ```bash
 root=$(herdr plugin list --plugin seeun.blueprint --json | uv run --no-project --quiet python -c 'import json, sys; p = json.load(sys.stdin)["result"]["plugins"]; print(p[0]["plugin_root"] if p else "")')
@@ -170,8 +189,9 @@ building, keep it current, and act on what you point at or edit:
     herdr plugin action invoke seeun.blueprint.install-skill
 
 This links `skills/blueprint` into `~/.claude/skills` and `~/.agents/skills`
-(a copy on Windows when symlinks are not allowed). Start a new agent session
-to pick it up. Undo with `herdr-blueprint uninstall-skill`.
+(a copy on Windows when symlinks are not allowed) and puts the short
+`herdr-blueprint` command in `~/.local/bin`. Start a new agent session to pick
+it up. Undo with `herdr-blueprint uninstall-skill`.
 
 ## Token use
 
@@ -196,6 +216,17 @@ Each redraw is also one more step for the agent, which reads its conversation
 again; prompt caching makes that cheap, but it counts toward usage limits. To
 use fewer tokens, close Blueprint while you don't look at it, or tell the agent
 to redraw only when you press `a`.
+
+## FAQ
+
+**Why not just ask the agent for Mermaid?** You can, and Blueprint draws it. What
+it adds: the drawing stays current (redrawn after each piece of work, flagged
+when the code behind it changed), you point at a part instead of describing
+it, boxes tied to code turn your note into a change to that code, and it all
+runs locally in your terminal, as open source.
+
+**Does it cost tokens?** Blueprint doesn't; the agent does when it draws. See
+[Token use](#token-use).
 
 ## Themes
 

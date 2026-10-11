@@ -63,6 +63,14 @@ wherever they are. A branch is measured from its last run into its target. In a 
 and step into a drawn diagram; going past its top or bottom leaves it. `g`/`G`
 pick the first/last part and `ctrl+d`/`ctrl+u` move half a screen.
 
+### Opening, staleness and the code itself (added 2026-10-11)
+
+Opened next to an agent, Blueprint asks it once to draw what it is doing; a
+busy agent (herdr's agent status) is asked when it finishes, and `a` asks at
+most once every 10 seconds. While a drawing is shown, the header says when files
+named by its `%% code:` lines changed since it was sent. Pointing at a part tied
+to code, `c` opens that file at its line in the editor pane.
+
 ### Parts tied to code
 
 A diagram can tie a part to the code it stands for with a Mermaid comment at
