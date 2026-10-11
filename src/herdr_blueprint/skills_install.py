@@ -58,16 +58,27 @@ def _install_command(skill: Path, home: Path) -> list[str]:
         return [f"skipped, command already exists: {dest}"]
     root = skill.resolve().parent.parent
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # The plugin folder named here may have moved (herdr builds elsewhere first): then ask herdr.
+    lookup = (
+        '"${HERDR_BIN_PATH:-herdr}" plugin list --plugin seeun.blueprint --json 2>/dev/null | '
+        "uv run --no-project --quiet python -c 'import json, sys; "
+        'p = json.load(sys.stdin)["result"]["plugins"]; print(p[0]["plugin_root"] if p else "")\''
+    )
     dest.write_text(
         f"#!/bin/sh\n{COMMAND_MARK}: runs the Blueprint plugin command line.\n"
-        f'exec uv run --project "{root}" --no-sync python -m herdr_blueprint "$@"\n',
+        f'root="{root}"\n'
+        f'[ -f "$root/herdr-plugin.toml" ] || root=$({lookup})\n'
+        '[ -n "$root" ] || { echo "herdr-blueprint: the Blueprint plugin is not installed in herdr" >&2; exit 1; }\n'
+        'exec uv run --project "$root" --no-sync python -m herdr_blueprint "$@"\n',
         encoding="utf-8",
     )
     dest.chmod(0o755)
     return [f"command: {dest}"]
 
 
-def install(skill: Path, home: Path) -> list[str]:
+def install(skill: Path, home: Path, copy: bool = False) -> list[str]:
+    """Link (or with `copy`, copy) the skill into each agent's folder, and put the short
+    command in ~/.local/bin. Never over a file that isn't ours."""
     lines = _install_command(skill, home)
     for folder in skill_folders(home):
         dest = folder / skill.name
@@ -81,6 +92,8 @@ def install(skill: Path, home: Path) -> list[str]:
                 continue
             shutil.rmtree(dest)  # refresh our old copy
         try:
+            if copy:
+                raise OSError("copy asked for")
             dest.symlink_to(skill, target_is_directory=True)
             lines.append(f"linked: {dest}")
         except OSError:

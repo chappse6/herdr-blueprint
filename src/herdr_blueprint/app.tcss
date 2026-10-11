@@ -26,6 +26,25 @@ Screen {
     color: $primary;
 }
 
+/* After a request went to the agent: what was sent, until its new version arrives. */
+#banner {
+    display: none;
+    height: auto;
+    padding: 0 2;
+    background: $success 25%;
+    color: $foreground;
+    text-style: bold;
+}
+
+#banner.-warn {
+    background: $warning 25%;
+}
+
+/* A document block a note was sent about, until the agent's new version arrives. */
+.requested {
+    border-left: thick $warning;
+}
+
 #body {
     padding: 1 2;
     background: $background;

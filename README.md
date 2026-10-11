@@ -83,6 +83,10 @@ herdr plugin install chappse6/herdr-blueprint
 herdr plugin action invoke seeun.blueprint.open
 ```
 
+Installing the plugin also gives Claude Code and Codex the Blueprint skill and
+the short `herdr-blueprint` command (see [Send things from an agent](#send-things-from-an-agent));
+start a new agent session to pick the skill up.
+
 It opens to the right of the focused pane and takes the focus. If Blueprint is
 already open in the workspace, it is focused instead of opening a second one.
 Bind it to a key in `~/.config/herdr/config.toml`:
@@ -124,9 +128,11 @@ part to select it. Moving follows the screen: `h` and `l` reach what is on the
 same rows, `j` and `k` what is in the same columns (else the next row), and an
 arrow leads to what it joins. Press Enter, say what should change, and press
 Enter again: the agent next to Blueprint gets the part, where it is in the
-source and your note. Esc steps back. While you type a note, whatever the agent sends waits
-until you close it, and a note you keep moves to the next version of the same
-diagram.
+source and your note. Esc steps back. Once it is sent, a banner under the
+header says so and stays until the agent's new version arrives, and the part
+stays marked in the drawing. While you type a note, whatever the agent sends
+waits until you close it, and a note you keep moves to the next version of the
+same diagram.
 
 <p align="center">
   <img src="docs/screenshots/point-and-ask.png" width="60%" alt="A design of a token endpoint with the box Code expired selected and the note: return 401 when the code expired">
@@ -184,15 +190,17 @@ root=$(herdr plugin list --plugin seeun.blueprint --json | uv run --no-project -
 uv run --project "$root" --no-sync python -m herdr_blueprint send --draw --title "Flow" < flow.mmd
 ```
 
-Teach Claude Code and Codex to use Blueprint on their own: draw what they are
-building, keep it current, and act on what you point at or edit:
+The skill teaches Claude Code and Codex to use Blueprint on their own: draw
+what they are building, keep it current, and act on what you point at or edit.
+Installing or updating the plugin copies it into `~/.claude/skills` and
+`~/.agents/skills` and puts the short `herdr-blueprint` command in
+`~/.local/bin`, never over files that aren't its own. A plugin used from a
+local folder (`herdr plugin link`) isn't built, so add the skill there with:
 
     herdr plugin action invoke seeun.blueprint.install-skill
 
-This links `skills/blueprint` into `~/.claude/skills` and `~/.agents/skills`
-(a copy on Windows when symlinks are not allowed) and puts the short
-`herdr-blueprint` command in `~/.local/bin`. Start a new agent session to pick
-it up. Undo with `herdr-blueprint uninstall-skill`.
+Start a new agent session to pick it up. Removing the plugin leaves the skill
+behind: undo with `herdr-blueprint uninstall-skill` first.
 
 ## Token use
 

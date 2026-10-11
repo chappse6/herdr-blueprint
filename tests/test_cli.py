@@ -250,3 +250,14 @@ def test_help_lists_only_the_commands_people_use(capsys):
         cli.main(["--help"])
     out = capsys.readouterr().out
     assert "edit-session" not in out and "SUPPRESS" not in out and "status" in out
+
+
+def test_install_skill_during_a_build_never_fails_the_install(monkeypatch, capsys):
+    from herdr_blueprint import skills_install
+
+    def broken(*args, **kwargs):
+        raise PermissionError("read-only home")
+
+    monkeypatch.setattr(skills_install, "install", broken)
+    assert cli.main(["install-skill", "--copy"]) == 0
+    assert "read-only home" in capsys.readouterr().err

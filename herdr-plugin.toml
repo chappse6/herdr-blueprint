@@ -1,6 +1,6 @@
 id = "seeun.blueprint"
 name = "Blueprint"
-version = "0.6.0"
+version = "0.6.1"
 min_herdr_version = "0.9.3"
 description = "Your coding agent explains its work as diagrams, right next to the chat."
 platforms = ["macos", "linux", "windows"]
@@ -11,6 +11,11 @@ platforms = ["macos", "linux", "windows"]
 # module instead of the console script, whose first line names the old python.
 [[build]]
 command = ["uv", "sync", "--frozen", "--no-dev", "--no-editable"]
+
+# Installing (or updating) the plugin installs the agent skill and the short
+# command too. A copy, not a link: this folder is about to move.
+[[build]]
+command = ["uv", "run", "--no-sync", "python", "-m", "herdr_blueprint", "install-skill", "--copy"]
 
 [[panes]]
 id = "viewer"

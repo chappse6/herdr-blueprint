@@ -90,7 +90,8 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("open", help="open the viewer pane in herdr")
     commands.add_parser("status", help="print open or closed: whether a viewer is open (exit 0 when open)")
     commands.add_parser("edit-session")  # no help: left out of the command list
-    commands.add_parser("install-skill", help="add the Blueprint skill to Claude Code and Codex")
+    install_skill = commands.add_parser("install-skill", help="add the Blueprint skill to Claude Code and Codex")
+    install_skill.add_argument("--copy", action="store_true", help=argparse.SUPPRESS)  # the plugin build: never fails it
     commands.add_parser("uninstall-skill", help="remove the Blueprint skill")
     return parser
 
@@ -143,8 +144,16 @@ def main(argv: list[str] | None = None) -> int:
         if not skill.is_dir():
             print("herdr-blueprint: skill folder not found; run from the plugin folder", file=sys.stderr)
             return 1
-        step = skills_install.install if args.command == "install-skill" else skills_install.uninstall
-        for line in step(skill, Path.home()) or ["nothing to do"]:
+        building = getattr(args, "copy", False)
+        try:
+            if args.command == "install-skill":
+                lines = skills_install.install(skill, Path.home(), copy=building)
+            else:
+                lines = skills_install.uninstall(skill, Path.home())
+        except OSError as exc:
+            print(f"herdr-blueprint: could not install the skill: {exc}", file=sys.stderr)
+            return 0 if building else 1  # a plugin install still succeeds without it
+        for line in lines or ["nothing to do"]:
             print(line)
         return 0
 

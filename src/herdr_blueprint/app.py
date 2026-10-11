@@ -68,6 +68,8 @@ SIDE_STEP = 4
 
 # Seconds between checks of the pane next to Blueprint (an agent may start or quit).
 NEIGHBOR_SECONDS = 5
+# How long "sent a new version" stays in the banner.
+BANNER_SECONDS = 6
 # Seconds after asking the agent to draw before `a` asks again: a held key sends once.
 ASK_COOLDOWN = 10
 # Unanswered checks in a row before the editor pane counts as closed by hand.
@@ -125,6 +127,17 @@ class LiveEdit:
     stop: asyncio.Event
     misses: int = 0  # pane checks in a row that herdr didn't answer
     polling: bool = False  # the file watcher failed: the pane check reads the copy instead
+
+
+@dataclass
+class Pending:
+    """A request that reached the agent, shown in the banner until its new version arrives."""
+
+    agent: str
+    described: str
+    at: float
+    is_edit: bool
+    part_id: str | None = None  # the part a note was about
 
 
 @dataclass
@@ -343,6 +356,7 @@ class BlueprintApp(App[None]):
         self._waiting_to_ask = False
         self._asked_at = float("-inf")  # when `a` last asked (or the ask is still going)
         self.stale_files: list[str] = []  # code behind the drawing changed since it was sent
+        self.pending: Pending | None = None  # what the banner says went to the agent
         self._live_timer = None
         self.preview_text: str | None = None  # what the live preview shows
         # Unsent edits, one per document; the next `e` on that document reopens it.
@@ -375,6 +389,7 @@ class BlueprintApp(App[None]):
             yield Static("BLUEPRINT", id="brand")
             yield Static("", id="source")
             yield Static("", id="status")
+        yield Static("", id="banner")
         yield VerticalScroll(id="body")
         yield Footer()
 
@@ -389,6 +404,7 @@ class BlueprintApp(App[None]):
         self._update_status()
         self.run_worker(self._read_inbox(), exclusive=False, exit_on_error=False)
         self.set_interval(30, self._update_status)
+        self.set_interval(30, self._show_pending)  # "2m ago" moves on
         if self.source:
             self.set_interval(NEIGHBOR_SECONDS, self.refresh_source)
             self.set_interval(NEIGHBOR_SECONDS, self.check_freshness)
@@ -494,6 +510,7 @@ class BlueprintApp(App[None]):
                 self.notice = f"Your unsent work on '{clean(title)}' was dropped"
                 self.notice_ok = False
         self.stale_files = []
+        self._arrived(item)
         self.refresh_bindings()
         self._update_status()
         return bool(dropped)
@@ -1043,7 +1060,16 @@ class BlueprintApp(App[None]):
             agent = message.removeprefix("Sent to ") if message.startswith("Sent to ") else "the agent"
             text = f"Sent your edit to {agent}" if request.is_edit else f"Asked {agent} about {request.described}"
             self._show_notice(text, ok=True)
-        elif here and not request.is_edit:
+            part_id = None if request.is_edit else request.key[1]
+            self.pending = Pending(agent, request.described, time.time(), request.is_edit, part_id)
+            self._show_pending()
+            if part_id and here:
+                self._mark(part_id)
+            self.refresh_bindings()
+            return
+        self.pending = None
+        self._set_banner(f"⚠ Not sent: {clean(message)}", ok=False)
+        if here and not request.is_edit:
             self._show_notice(f"{clean(message)}. Your note was kept; point at it and press Enter to send it again")
         elif here:
             again = "press e" if self.preview_text is not None else "press e twice"  # a preview edits on the first e
@@ -1060,6 +1086,59 @@ class BlueprintApp(App[None]):
             what = "edit of" if request.is_edit else "note on"
             self._show_notice(f"{clean(message)}. Your {what} '{clean(request.item.title)}' was not sent and was dropped")
         self.refresh_bindings()
+
+    # The banner -----------------------------------------------------------------
+
+    def _set_banner(self, text: str | None, ok: bool = True) -> None:
+        try:
+            banner = self.query_one("#banner", Static)
+        except NoMatches:
+            return
+        banner.display = bool(text)
+        banner.set_class(not ok, "-warn")
+        banner.update(Text(text or ""))
+
+    def _show_pending(self) -> None:
+        pending = self.pending
+        if pending is None:
+            return
+        if pending.is_edit:
+            rest = "showing your version" if self.preview_text is not None else "the agent's version comes next"
+            self._set_banner(f"✓ Sent your edit to {pending.agent} {ago(pending.at)} · {rest}")
+        else:
+            self._set_banner(f"✓ Asked {pending.agent} about {pending.described} {ago(pending.at)} · waiting for the new version")
+
+    def _mark(self, part_id: str) -> None:
+        """Mark the part a note was sent about, in the drawing or as a document block."""
+        parts = self._compute_parts()
+        index = next((i for i, part in enumerate(parts) if part.id == part_id), None)
+        if index is not None:
+            part, views = parts[index], self.query(DiagramView)
+            if views and part.boxes:
+                views.first().mark(part)
+            elif index < len(self._part_widgets):
+                widget = self._part_widgets[index]
+                if part.boxes and isinstance(widget, DiagramFence):
+                    widget.mark(part)
+                else:
+                    widget.add_class("requested")
+        if not self.pointing:
+            self._part_widgets = []
+
+    def _arrived(self, item: Item) -> None:
+        """A new version from the agent after a request: say so, briefly."""
+        pending = self.pending
+        if pending is None:
+            return
+        if item.sent_by == "you":
+            self.pending = None  # another document: the banner was about the last one
+            self._set_banner(None)
+            return
+        if item.at <= pending.at:
+            return  # the same version again (r)
+        self.pending = None
+        self._set_banner(f"✓ {pending.agent} sent a new version")
+        self.set_timer(BANNER_SECONDS, lambda: self._set_banner(None) if self.pending is None else None)
 
     def _prompt_for(self, kept: KeptEdit, target: pane.Source) -> str:
         item = kept.item
@@ -1313,6 +1392,8 @@ class BlueprintApp(App[None]):
     def on_diagram_view_drawn(self, event: DiagramView.Drawn) -> None:
         if self.pointing and self.query(DiagramView):
             self._refresh_parts()
+        if self.pending and self.pending.part_id and not self.pointing:
+            self._mark(self.pending.part_id)  # a resize can move the boxes
 
     def on_diagram_fence_drawn(self, event: DiagramFence.Drawn) -> None:
         if self.pointing and self.query(DocumentView):

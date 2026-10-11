@@ -27,6 +27,17 @@ from .themes import palette_for_theme
 PLACEHOLDER = "Drawing diagram…"
 
 
+def painted(app: App, drawing: Drawing, shown: Part | None, marked: Part | None) -> Text:
+    """The drawing with the part a note was sent about in the warning colour, and the
+    selected part in reverse video on top."""
+    text = drawing.text
+    if marked is not None:
+        text = highlight(text, marked, Style(color=palette_for_theme(app.theme).warning, bold=True))
+    if shown is not None:
+        text = highlight(text, shown, Style(reverse=True))
+    return text
+
+
 def as_code(source: str) -> str:
     """Mermaid source as a fenced code block, shown as-is without drawing."""
     longest = max((len(run) for run in re.findall(r"`+", source)), default=0)
@@ -60,8 +71,9 @@ class DiagramFence(MarkdownFence):
         self._requested: tuple[str, int] | None = None
         # The last drawing shown, with its layout; None until drawn (or if it failed).
         self.drawing: Drawing | None = None
-        # The part shown highlighted in point mode.
+        # The part shown highlighted in point mode, and one a note was sent about.
         self.shown: Part | None = None
+        self.marked: Part | None = None
         if self.is_mermaid:
             self._highlighted_code = Content(PLACEHOLDER)
 
@@ -106,9 +118,9 @@ class DiagramFence(MarkdownFence):
 
     def _show(self, drawing: Drawing | None, content: Content) -> None:
         self.drawing = drawing
-        if drawing is not None and self.shown is not None:
-            # Redrawn while pointing (a theme change): keep the selection highlighted.
-            content = Content.from_rich_text(highlight(drawing.text, self.shown, Style(reverse=True)))
+        if drawing is not None and (self.shown or self.marked):
+            # Redrawn (a theme change): keep the selection and the mark.
+            content = Content.from_rich_text(painted(self.app, drawing, self.shown, self.marked))
         self._highlighted_code = content
         self.set_content(content)
         self.post_message(self.Drawn(self))
@@ -116,9 +128,16 @@ class DiagramFence(MarkdownFence):
     def show(self, part: Part | None) -> None:
         """Highlight `part` (None for none) in the current drawing."""
         self.shown = part
+        self._repaint()
+
+    def mark(self, part: Part | None) -> None:
+        """Mark the part a note was sent about (None for none)."""
+        self.marked = part
+        self._repaint()
+
+    def _repaint(self) -> None:
         if self.drawing is not None:
-            text = self.drawing.text if part is None else highlight(self.drawing.text, part, Style(reverse=True))
-            self._highlighted_code = Content.from_rich_text(text)
+            self._highlighted_code = Content.from_rich_text(painted(self.app, self.drawing, self.shown, self.marked))
             self.set_content(self._highlighted_code)
 
 
@@ -161,8 +180,9 @@ class DiagramView(Static):
         self._requested: tuple[str, int | None] | None = None
         # The last drawing shown, with its layout; None until drawn (or if it failed).
         self.drawing: Drawing | None = None
-        # The part shown highlighted in point mode.
+        # The part shown highlighted in point mode, and one a note was sent about.
         self.shown: Part | None = None
+        self.marked: Part | None = None
 
     class Drawn(Message):
         """A new drawing is on screen (first draw, theme change, resize)."""
@@ -182,8 +202,13 @@ class DiagramView(Static):
         """Highlight `part` (None for none) in the current drawing."""
         self.shown = part
         if self.drawing is not None:
-            text = self.drawing.text if part is None else highlight(self.drawing.text, part, Style(reverse=True))
-            self.update(Content.from_rich_text(text))
+            self.update(Content.from_rich_text(painted(self.app, self.drawing, self.shown, self.marked)))
+
+    def mark(self, part: Part | None) -> None:
+        """Mark the part a note was sent about (None for none)."""
+        self.marked = part
+        if self.drawing is not None:
+            self.update(Content.from_rich_text(painted(self.app, self.drawing, self.shown, self.marked)))
 
     def on_click(self, event: events.Click) -> None:
         offset = event.get_content_offset(self)

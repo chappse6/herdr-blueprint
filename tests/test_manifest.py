@@ -19,9 +19,11 @@ README = (ROOT / "README.md").read_text(encoding="utf-8")
 
 
 def test_build_installs_a_copy_not_a_link_to_the_checkout():
-    (build,) = MANIFEST["build"]
+    build, skill = MANIFEST["build"]
     assert build["command"][:2] == ["uv", "sync"]
     assert "--no-editable" in build["command"]
+    # Installing the plugin installs the skill too: copied, since the checkout moves.
+    assert skill["command"][-2:] == ["install-skill", "--copy"]
 
 
 def test_commands_run_the_module_not_a_console_script():
