@@ -53,8 +53,19 @@ class DiagramFence(MarkdownFence):
     def __init__(self, markdown: Markdown, token, code: str) -> None:
         super().__init__(markdown, token, code)
         self._requested: tuple[str, int] | None = None
+        # The last drawing shown, with its layout; None until drawn (or if it failed).
+        self.drawing: Drawing | None = None
+        # The part shown highlighted in point mode.
+        self.shown: Part | None = None
         if self.is_mermaid:
             self._highlighted_code = Content(PLACEHOLDER)
+
+    class Drawn(Message):
+        """A new drawing is on screen (first draw, theme change, resize)."""
+
+        def __init__(self, fence: "DiagramFence") -> None:
+            super().__init__()
+            self.fence = fence
 
     @property
     def is_mermaid(self) -> bool:
@@ -80,13 +91,27 @@ class DiagramFence(MarkdownFence):
         self.run_worker(partial(self._draw, width), thread=True, exclusive=True, group="draw")
 
     def _draw(self, width: int) -> None:
-        content = draw(self.app, self.code, width)
+        try:
+            drawing: Drawing | None = draw_diagram(self.code, palette_for_theme(self.app.theme), width)
+            content = Content.from_rich_text(drawing.text)
+        except DiagramError:
+            drawing, content = None, draw(self.app, self.code, width)
         if not get_current_worker().is_cancelled:
-            self.app.call_from_thread(self._show, content)
+            self.app.call_from_thread(self._show, drawing, content)
 
-    def _show(self, content: Content) -> None:
+    def _show(self, drawing: Drawing | None, content: Content) -> None:
+        self.drawing = drawing
         self._highlighted_code = content
         self.set_content(content)
+        self.post_message(self.Drawn(self))
+
+    def show(self, part: Part | None) -> None:
+        """Highlight `part` (None for none) in the current drawing."""
+        self.shown = part
+        if self.drawing is not None:
+            text = self.drawing.text if part is None else highlight(self.drawing.text, part, Style(reverse=True))
+            self._highlighted_code = Content.from_rich_text(text)
+            self.set_content(self._highlighted_code)
 
 
 class DocumentView(Markdown):

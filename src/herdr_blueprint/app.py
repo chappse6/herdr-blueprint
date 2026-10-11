@@ -23,6 +23,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.geometry import Region
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
+from textual.widget import Widget
 from textual.widgets import Footer, Input, OptionList, Static
 from textual.widgets.markdown import MarkdownFence
 from textual.widgets.option_list import Option
@@ -30,7 +31,7 @@ from textual.widgets.option_list import Option
 from . import config as config_store
 from . import edit, point
 from .diagram import MAX_DIAGRAM_CHARS
-from .document import DiagramView, DocumentView, PlainView, as_code
+from .document import DiagramFence, DiagramView, DocumentView, PlainView, as_code
 from .item import MAX_BYTES, Item, clean, is_large
 from .sources import pane
 from .sources.inbox import Refresh, watch_inbox
@@ -71,6 +72,23 @@ SIDE_STEP = 4
 NEIGHBOR_SECONDS = 5
 # Unanswered checks in a row before the editor pane counts as closed by hand.
 PANE_MISSES = 2
+
+
+def scroll_into_view(widget: Widget, region: Region) -> None:
+    """Scroll every container above `widget` until `region` (cells of its content) shows:
+    Textual's scroll_to_widget, for part of a widget."""
+    gutter = widget.styles.gutter
+    region = region.translate(widget.virtual_region.offset).translate((gutter.left, gutter.top))
+    while isinstance(widget.parent, Widget):
+        container = widget.parent
+        moved = container.scroll_to_region(region, animate=False, immediate=True)
+        region = (
+            region.translate(-moved)
+            .translate(container.styles.margin.top_left)
+            .translate(container.styles.border.spacing.top_left)
+            .translate(container.virtual_region_with_margin.offset)
+        )
+        widget = container
 
 
 def ago(at: float, now: float | None = None) -> str:
@@ -961,9 +979,16 @@ class BlueprintApp(App[None]):
         documents = self.query(DocumentView)
         if documents:
             blocks = [b for b in documents.first().children if hasattr(b, "source_range")]
-            self._part_widgets = blocks
             described = [(b._token.type, b.source_range, getattr(b._token, "info", "") or "") for b in blocks]
-            return point.document_parts(described, self._shown_text)
+            parts: list[point.Part] = []
+            for block, part in zip(blocks, point.document_parts(described, self._shown_text)):
+                # A drawn diagram is pointed at box by box; anything else as a whole block.
+                drawing = block.drawing if isinstance(block, DiagramFence) else None
+                inner = point.diagram_parts(block.code, drawing.padding, drawing.text) if drawing else []
+                for each in point.fence_parts(part, inner) if inner else [part]:
+                    parts.append(each)
+                    self._part_widgets.append(block)
+            return parts
         return []
 
     def _start_point(self, select: int = 0) -> bool:
@@ -991,10 +1016,20 @@ class BlueprintApp(App[None]):
                     Region(region.x + box.x, region.y + 1 + box.y, box.width, box.height), animate=False,
                 )
             return
-        for i, widget in enumerate(self._part_widgets):
-            widget.set_class(i == index, "pointed")
-        if index < len(self._part_widgets):
-            body.scroll_to_widget(self._part_widgets[index], animate=False)
+        target = self._part_widgets[index] if index < len(self._part_widgets) else None
+        for widget in dict.fromkeys(self._part_widgets):
+            widget.set_class(widget is target and not part.boxes, "pointed")
+            if isinstance(widget, DiagramFence):
+                wanted = part if widget is target and part.boxes else None
+                if widget.shown != wanted:
+                    widget.show(wanted)
+        if target is None:
+            return
+        if part.boxes:
+            box = part.boxes[0]
+            scroll_into_view(target.query_one("#code-content"), Region(box.x, box.y, box.width, box.height))
+        else:
+            body.scroll_to_widget(target, animate=False)
 
     def _end_point(self, keep_note: bool = True) -> None:
         notes = self.query(NoteLine)
@@ -1005,8 +1040,10 @@ class BlueprintApp(App[None]):
         self.pointing = False
         for view in self.query(DiagramView):
             view.show(None)
-        for widget in self._part_widgets:
+        for widget in dict.fromkeys(self._part_widgets):
             widget.remove_class("pointed")
+            if isinstance(widget, DiagramFence):
+                widget.show(None)
         self._part_widgets = []
         self.refresh_bindings()
 
@@ -1081,12 +1118,24 @@ class BlueprintApp(App[None]):
             self._end_point()
 
     def on_diagram_view_drawn(self, event: DiagramView.Drawn) -> None:
-        # A redraw (theme, resize) can change the layout: find the parts again.
         if self.pointing and self.query(DiagramView):
-            chosen = self.parts[self.selected].id if self.parts else ""
-            self.parts = self._compute_parts()
-            ids = [p.id for p in self.parts]
-            self._select(ids.index(chosen) if chosen in ids else 0)
+            self._refresh_parts()
+
+    def on_diagram_fence_drawn(self, event: DiagramFence.Drawn) -> None:
+        if self.pointing and self.query(DocumentView):
+            self._refresh_parts()
+
+    def _refresh_parts(self) -> None:
+        """A (re)drawn diagram can change the layout: find the parts again, keeping the selection.
+        A block that got drawn meanwhile keeps it on its first box, and the other way round."""
+        chosen = self.parts[self.selected].id if self.parts else ""
+        self.parts = self._compute_parts()
+        if not self.parts:
+            return
+        ids = [p.id for p in self.parts]
+        block = chosen.split("/")[0]
+        index = ids.index(chosen) if chosen in ids else next((i for i, id_ in enumerate(ids) if id_.split("/")[0] == block), 0)
+        self._select(index)
 
     def on_diagram_view_clicked(self, event: DiagramView.Clicked) -> None:
         if not self.pointing and not (self._pointable() and self._start_point()):
@@ -1097,14 +1146,25 @@ class BlueprintApp(App[None]):
                 return
 
     def on_click(self, event: events.Click) -> None:
-        # A click on a document block points at it.
-        widget = event.widget
+        # A click on a document block points at it. Look under the mouse: a click
+        # inside a fence (a scroll container) arrives here with the screen as its widget.
+        try:
+            widget, _region = self.screen.get_widget_at(event.screen_x, event.screen_y)
+        except Exception:
+            return
         while widget is not None and not (hasattr(widget, "source_range") and isinstance(widget.parent, DocumentView)):
             widget = widget.parent
         if widget is None or not self.pointing and not (self._pointable() and self._start_point()):
             return
-        if widget in self._part_widgets:
-            self._select(self._part_widgets.index(widget))
+        group = [i for i, w in enumerate(self._part_widgets) if w is widget]
+        if not group:
+            return
+        if self.parts[group[0]].boxes:  # a drawn diagram: the box under the click
+            offset = event.get_content_offset(widget.query_one("#code-content"))
+            hits = [i for i in group if offset is not None and any(b.contains(offset.x, offset.y) for b in self.parts[i].boxes)]
+            self._select(hits[0] if hits else group[0])
+        else:
+            self._select(group[0])
 
     def _attach(self, text: str, stem: str, suffix: str) -> Path | None:
         """Put a long prompt body in its own file for the agent; None to inline it instead."""
@@ -1157,12 +1217,11 @@ class BlueprintApp(App[None]):
         if self.pointing:
             if self.query(NoteLine) or not self.parts:
                 return
-            if self._part_widgets or not self.parts[self.selected].boxes:
-                if dy:  # documents: next or previous block
-                    self._select(max(0, min(len(self.parts) - 1, self.selected + dy)))
+            if self._part_widgets:
+                self._move_in_document(dx, dy)
                 return
-            direction = "right" if dx > 0 else "left" if dx < 0 else "down" if dy > 0 else "up"
-            self._select(point.nearest(self.parts, self.selected, direction))
+            if self.parts[self.selected].boxes:
+                self._select(point.nearest(self.parts, self.selected, self._direction(dx, dy)))
             return
         plain = self.query(PlainView)
         if plain:
@@ -1180,6 +1239,40 @@ class BlueprintApp(App[None]):
         for fence in self.query(MarkdownFence):
             if fence.max_scroll_x > 0:
                 fence.scroll_relative(x=dx * SIDE_STEP, animate=False)
+
+    @staticmethod
+    def _direction(dx: int, dy: int) -> str:
+        return "right" if dx > 0 else "left" if dx < 0 else "down" if dy > 0 else "up"
+
+    def _move_in_document(self, dx: int, dy: int) -> None:
+        """j/k: the next or previous block. Inside a drawn diagram, hjkl move box to box
+        by direction; going down past its bottom (or up past its top) leaves it."""
+        current, widgets = self.selected, self._part_widgets
+
+        def boxes_of(index: int) -> list[int]:
+            return [i for i, w in enumerate(widgets) if w is widgets[index]]
+
+        if self.parts[current].boxes:
+            group = boxes_of(current)
+            beside = group[point.nearest([self.parts[i] for i in group], group.index(current), self._direction(dx, dy))]
+            if beside != current or not dy:
+                self._select(beside)
+                return
+            target = group[-1] + 1 if dy > 0 else group[0] - 1
+        elif dy:
+            target = current + dy
+        else:
+            return
+        if not 0 <= target < len(self.parts):
+            return
+        if self.parts[target].boxes:
+            # Into a diagram: its top box going down, its bottom box going up.
+            def place(i: int) -> tuple[float, float]:
+                x, y = self.parts[i].boxes[0].center
+                return (y, x) if dy > 0 else (-y, x)
+
+            target = min(boxes_of(target), key=place)
+        self._select(target)
 
     def action_page(self, direction: int) -> None:
         """ctrl+d and ctrl+u: half a screen down or up, like vim."""

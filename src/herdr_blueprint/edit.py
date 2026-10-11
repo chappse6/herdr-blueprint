@@ -52,7 +52,7 @@ def editor_command(
     which: Callable[[str], str | None] = shutil.which,
     system: str | None = None,
 ) -> list[str] | None:
-    """$VISUAL, else $EDITOR, else vim, vi, nano; notepad last on Windows.
+    """$BLUEPRINT_EDITOR, else $VISUAL, else $EDITOR, else vim, vi, nano; notepad last on Windows.
 
     None when nothing is set and nothing is installed. EditorError when the
     setting can't be parsed or names a program that isn't there: starting it
@@ -61,7 +61,8 @@ def editor_command(
     environ = os.environ if environ is None else environ
     system = os.name if system is None else system
     command: list[str] | None = None
-    for key in ("VISUAL", "EDITOR"):
+    # BLUEPRINT_EDITOR first: $EDITOR is often set up for something else (say, starting in insert mode).
+    for key in ("BLUEPRINT_EDITOR", "VISUAL", "EDITOR"):
         raw = environ.get(key, "").strip()
         if raw:
             try:

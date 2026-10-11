@@ -44,6 +44,7 @@ class Part:
     boxes: tuple[Box, ...] = ()
     lines: tuple[int, int] | None = None  # 1-based, inclusive
     detail: str = ""
+    where: str = ""  # the diagram it sits in, inside a document
 
 
 # --- diagrams ----------------------------------------------------------------------
@@ -252,6 +253,19 @@ def document_parts(blocks: list[tuple[str, tuple[int, int], str]], source: str) 
     return parts
 
 
+def fence_parts(block: Part, parts: list[Part]) -> list[Part]:
+    """The parts of a diagram drawn in a document's Mermaid block, placed in that document."""
+    where = f'the diagram under "{block.detail}"' if block.detail else "the diagram"
+    start = block.lines[0] if block.lines else 0  # the fence line; the diagram's line 1 is the next one
+    return [
+        replace(
+            part, id=f"{block.id}/{part.id}", where=where,
+            lines=(part.lines[0] + start, part.lines[1] + start) if part.lines else (start, start) if block.lines else None,
+        )
+        for part in parts
+    ]
+
+
 # --- moving and showing --------------------------------------------------------------
 
 
@@ -296,6 +310,8 @@ def highlight(text: Text, part: Part, style: Style) -> Text:
 
 
 def describe(part: Part) -> str:
+    if part.where:
+        return f"{describe(replace(part, where=''))} in {part.where}"
     if part.kind == "node":
         return f'the box "{part.label}"'
     if part.kind == "participant":
@@ -322,7 +338,10 @@ def _where(lines: tuple[int, int] | None, line_text: str) -> str:
     if not lines:
         return ""
     span = f"line {lines[0]}" if lines[0] == lines[1] else f"lines {lines[0]}-{lines[1]}"
-    return f", {span}: `{line_text.strip()}`" if line_text.strip() else f", {span}"
+    text = line_text.strip()
+    if not text:
+        return f", {span}"
+    return f", {span}: `` {text} ``" if "`" in text else f", {span}: `{text}`"
 
 
 def point_prompt(

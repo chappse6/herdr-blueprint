@@ -8,13 +8,14 @@ from textual.widgets import Input
 from herdr_blueprint import point
 from herdr_blueprint.app import BlueprintApp, NoteLine
 from herdr_blueprint.config import Config
-from herdr_blueprint.document import DiagramView, DocumentView, PlainView
+from herdr_blueprint.document import DiagramFence, DiagramView, DocumentView, PlainView
 from herdr_blueprint.item import Item
 from herdr_blueprint.sources import inbox
 from herdr_blueprint.sources.pane import Source
 
 FLOW = "graph LR\n  A[Browser] --> B[Tollgate]\n  B --> C[Redis]\n"
 WIDE = "graph LR\n" + "".join(f"  N{i}[Node number {i}] --> N{i + 1}[Node number {i + 1}]\n" for i in range(5))
+FENCED = "# Flow\n\nIntro.\n\n```mermaid\ngraph TD\n  A[Browser] --> B[Tollgate]\n  B --> C[Redis]\n```\n\nAfter.\n"
 DOC = "# Login flow\n\nThe app never sees the password.\n\n## Steps\n\n- authorize\n- token\n"
 
 
@@ -67,6 +68,16 @@ async def open_drawn(app, pilot, path):
     view = app.query_one(DiagramView)
     await wait_for(pilot, lambda: view.drawing is not None)
     return view
+
+
+async def open_fenced(app, pilot, tmp_path, text=FENCED):
+    path = tmp_path / "flow.md"
+    path.write_text(text, encoding="utf-8")
+    await app.open_item(Item(kind="file", title="flow.md", path=path, draw=True))
+    fence = app.query_one(DiagramFence)
+    await wait_for(pilot, lambda: fence.drawing is not None)
+    await pilot.pause()  # let the layout catch up with the drawing
+    return fence
 
 
 # --- entering and moving --------------------------------------------------------------
@@ -181,6 +192,89 @@ async def test_a_mouse_click_selects_the_node_under_it(tmp_path):
         box = view.drawing and point.diagram_parts(FLOW, view.drawing.padding, view.drawing.text)[2].boxes[0]
         await pilot.click(DiagramView, offset=(box.x + 2, box.y + 1 + 2))  # +1: the view's top padding
         assert app.pointing and app.selected == 2
+
+
+# --- diagrams inside a document ------------------------------------------------------
+
+async def test_j_walks_into_a_drawn_diagram_box_by_box_and_out_again(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 50)) as pilot:
+        await pilot.pause()
+        fence = await open_fenced(app, pilot, tmp_path)
+        await pilot.press("e")
+        assert [p.label for p in app.parts] == ["Flow", "Intro.", "Browser", "Tollgate", "Redis", "After."]
+        await pilot.press("j", "j")
+        assert app.parts[app.selected].label == "Browser" and fence.shown == app.parts[app.selected]
+        assert not fence.has_class("pointed")  # the box is highlighted, not the whole block
+        await pilot.press("j")
+        assert app.parts[app.selected].label == "Tollgate"
+        await pilot.press("j", "j")  # Redis, then out below the diagram
+        assert app.parts[app.selected].label == "After." and fence.shown is None
+        await pilot.press("k")
+        assert app.parts[app.selected].label == "Redis"  # back in from below: the bottom box
+
+
+async def test_enter_on_a_box_in_a_document_names_the_box_and_its_line(tmp_path):
+    prompter = FakePrompter()
+    app = make_app(tmp_path, prompter=prompter)
+    async with app.run_test(size=(100, 50)) as pilot:
+        await pilot.pause()
+        await open_fenced(app, pilot, tmp_path)
+        await pilot.press("e", "j", "j", "j", "enter", *"cache it", "enter")
+        await wait_for(pilot, lambda: prompter.sent)
+        text = prompter.sent[0][1]
+        assert 'the box "Tollgate" in the diagram under "Flow"' in text
+        assert "`flow.md`, line 7:" in text and "cache it" in text
+
+
+async def test_a_click_on_a_box_in_a_document_selects_it(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 50)) as pilot:
+        await pilot.pause()
+        fence = await open_fenced(app, pilot, tmp_path)
+        box = point.diagram_parts(fence.code, fence.drawing.padding, fence.drawing.text)[2].boxes[0]
+        region = fence.query_one("#code-content").content_region
+        await pilot.click(offset=(region.x + box.x + 1, region.y + box.y + 1))
+        assert app.pointing and app.parts[app.selected].label == "Redis"
+
+
+async def test_moving_past_the_edge_of_a_wide_diagram_scrolls_it(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(60, 30)) as pilot:
+        await pilot.pause()
+        fence = await open_fenced(app, pilot, tmp_path, "# Wide\n\n```mermaid\n" + WIDE + "```\n")
+        await pilot.press("e", "j")
+        for _ in range(5):
+            await pilot.press("l")
+        await pilot.pause()
+        part = app.parts[app.selected]
+        assert part.label == "Node number 5" and fence.scroll_x > 0
+        left = fence.query_one("#code-content").content_region.x + part.boxes[0].x
+        assert fence.region.x <= left and left + part.boxes[0].width <= fence.region.right
+
+
+async def test_a_redraw_keeps_the_box_selected(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 50)) as pilot:
+        await pilot.pause()
+        fence = await open_fenced(app, pilot, tmp_path)
+        await pilot.press("e", "j", "j", "j")
+        before = fence.drawing
+        app.theme = "bp-nord"
+        await wait_for(pilot, lambda: fence.drawing is not before)
+        await pilot.pause()
+        assert app.parts[app.selected].label == "Tollgate" and fence.shown.label == "Tollgate"
+
+
+async def test_e_on_a_box_in_a_document_opens_the_editor_on_its_line(tmp_path):
+    editor = FakeEditor()
+    app = make_app(tmp_path, editor=editor)
+    async with app.run_test(size=(100, 50)) as pilot:
+        await pilot.pause()
+        await open_fenced(app, pilot, tmp_path)
+        await pilot.press("e", "j", "j", "j", "j", "e")  # Redis
+        await wait_for(pilot, lambda: editor.seen)
+        assert "+8" in editor.seen[0]
 
 
 # --- asking ----------------------------------------------------------------------------------

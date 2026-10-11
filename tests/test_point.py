@@ -1,5 +1,7 @@
 """Parts of what Blueprint shows: boxes in termaid's drawing, lines in the source."""
 
+from dataclasses import replace
+
 import pytest
 from rich.cells import cell_len
 from rich.console import Console
@@ -154,6 +156,23 @@ def test_descriptions():
     flow = point.diagram_parts(FLOW, (4, 2, 4), draw(FLOW))
     assert point.describe(flow[1]) == 'the box "Tollgate"'
     assert point.describe(point.whole_diagram("graph LR\n  A --> B")) == "the whole diagram"
+
+
+def test_a_quoted_line_with_backticks_stays_one_span():
+    text = point.point_prompt("the diagram block", "x", lines=(7, 17), line_text="```mermaid", file_label="a.md")
+    assert "lines 7-17: `` ```mermaid ``." in text
+
+
+def test_parts_of_a_diagram_in_a_document_carry_their_place():
+    block = point.Part("diagram", "block-6", "mermaid", (), (16, 19), "Steps")
+    inner = point.diagram_parts(FLOW, (4, 2, 4), draw(FLOW))
+    placed = point.fence_parts(block, inner)
+    assert [p.id for p in placed] == ["block-6/A", "block-6/B", "block-6/C"]
+    assert placed[1].lines == (18, 18)  # line 2 of the diagram; the fence opens on line 16
+    assert placed[1].boxes == inner[1].boxes
+    assert point.describe(placed[1]) == 'the box "Tollgate" in the diagram under "Steps"'
+    unplaced = point.fence_parts(replace(block, detail=""), [replace(inner[0], lines=None)])[0]
+    assert unplaced.lines == (16, 16) and point.describe(unplaced) == 'the box "브라우저" in the diagram'
 
 
 # --- documents --------------------------------------------------------------------

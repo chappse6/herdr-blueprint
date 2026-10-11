@@ -22,6 +22,13 @@ def test_editor_prefers_visual_then_editor_then_path():
     assert edit.editor_command({}, which=which_only("nano"), system="posix") == ["/usr/bin/nano"]
 
 
+def test_blueprint_editor_comes_first():
+    # For people whose $EDITOR is set up for something else (say, starting in insert mode).
+    which = which_only("nvim", "hx")
+    environ = {"BLUEPRINT_EDITOR": "nvim", "VISUAL": "hx", "EDITOR": "hx"}
+    assert edit.editor_command(environ, which=which, system="posix") == ["/usr/bin/nvim"]
+
+
 def test_no_editor_at_all():
     assert edit.editor_command({}, which=which_only(), system="posix") is None
 
