@@ -823,11 +823,12 @@ class BlueprintApp(App[None]):
             self._show_notice("Edit cancelled")
         else:
             sent = self._after_edit(live.item, live.kept, live.base, live.base_bytes, saved, edited)
-        if sent and self.preview_text != edited:
+        preview = edited.replace("\r\n", "\n")  # as the live redraws read it; `edited` keeps the bytes for the diff
+        if sent and self.preview_text != preview:
             # Saved and quit faster than a redraw: show what was sent.
-            self.preview_text = edited
+            self.preview_text = preview
             async with self._render_lock:
-                await self._render_text(clean(edited), diagram=live.item.is_diagram, draw=live.item.draw or self._shown_drawn, plain=False)
+                await self._render_text(clean(preview), diagram=live.item.is_diagram, draw=live.item.draw or self._shown_drawn, plain=False)
         if not sent:
             # Back to the original, or the newest send that waited; keep the message
             # unless that send dropped the work it talks about.

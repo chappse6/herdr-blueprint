@@ -80,7 +80,8 @@ def editor_command(
         return [found]
     # Resolve the program: `EDITOR=code` finds code.cmd on Windows, ~ is home.
     program = os.path.expandvars(os.path.expanduser(command[0]))
-    resolved = which(program) or (program if Path(program).is_file() else None)
+    # A file given by path: written the system's way (~ on Windows mixes / and \).
+    resolved = which(program) or (str(Path(program)) if Path(program).is_file() else None)
     if resolved is None:
         raise EditorError(f"Editor not found: {command[0]}")
     command[0] = resolved

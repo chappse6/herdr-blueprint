@@ -59,6 +59,7 @@ def test_an_editor_path_with_home_or_a_plain_file_works(tmp_path, monkeypatch):
     program.parent.mkdir()
     program.write_text("#!/bin/sh\n")
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # what ~ means on Windows
     nowhere = which_only()
     assert edit.editor_command({"EDITOR": "~/bin/myvim -n"}, which=nowhere, system="posix") == [str(program), "-n"]
     assert edit.editor_command({"EDITOR": str(program)}, which=nowhere, system="posix") == [str(program)]
@@ -133,7 +134,8 @@ def test_diff_lines_are_the_file_lines():
 def test_display_path_is_relative_inside_the_agent_folder(tmp_path):
     inside = tmp_path / "docs" / "flow.md"
     assert edit.display_path(inside, tmp_path) == "docs/flow.md"
-    assert edit.display_path(Path("/elsewhere/flow.md"), tmp_path) == "/elsewhere/flow.md"
+    elsewhere = Path("/elsewhere/flow.md")
+    assert edit.display_path(elsewhere, tmp_path) == str(elsewhere)  # as the system writes it
     assert edit.display_path(inside, None) == str(inside)
 
 
@@ -160,8 +162,9 @@ def test_text_prompt_sends_the_new_version_not_a_diff():
 
 
 def test_long_bodies_are_named_by_path():
-    prompt = edit.file_prompt("docs/flow.md", "x" * 10, diverged=False, attachment=Path("/tmp/b p/flow.diff"))
-    assert "`/tmp/b p/flow.diff`" in prompt and "```diff" not in prompt
+    attachment = Path("/tmp/b p/flow.diff")
+    prompt = edit.file_prompt("docs/flow.md", "x" * 10, diverged=False, attachment=attachment)
+    assert f"`{attachment}`" in prompt and "```diff" not in prompt
     assert edit.needs_attachment("x" * (edit.INLINE_LIMIT + 1))
     assert not edit.needs_attachment("x" * edit.INLINE_LIMIT)
 

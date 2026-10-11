@@ -205,6 +205,19 @@ async def test_sends_during_an_edit_that_was_sent_are_dropped(tmp_path):
         assert app.current.title == "flow.md" and app.preview_text == "# Flow\n\nnew line\n"
 
 
+async def test_a_save_with_windows_line_endings_previews_like_any_other(tmp_path):
+    fake = FakePane()
+    app = make_app(tmp_path, fake)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await start_editing(app, pilot, doc(tmp_path), fake)
+        fake.copy.write_text("# Flow\r\n\r\nnew line\r\n", encoding="utf-8", newline="")
+        fake.quit(0)
+        await wait_for(pilot, lambda: not app.editing)
+        await pilot.pause(0.2)
+        assert app.preview_text == "# Flow\n\nnew line\n"
+
+
 async def test_a_second_e_focuses_the_editor_pane(tmp_path):
     fake = FakePane()
     app = make_app(tmp_path, fake)
