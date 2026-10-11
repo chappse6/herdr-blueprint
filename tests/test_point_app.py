@@ -223,6 +223,40 @@ async def test_a_branch_can_be_pointed_at_and_asked_about(tmp_path):
         assert 'the branch "miss" from "Cached" to "Fetch"' in prompter.sent[0][1]
 
 
+async def test_g_and_shift_g_jump_to_the_first_and_last_part(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 50)) as pilot:
+        await pilot.pause()
+        await open_drawn(app, pilot, flow_file(tmp_path, FLOW.replace("graph LR", "graph TD")))
+        await pilot.press("e", "G")
+        assert app.pointing and app.parts[app.selected].label == "Redis"
+        await pilot.press("g", "g")
+        assert app.parts[app.selected].label == "Browser"
+        await open_fenced(app, pilot, tmp_path)
+        await pilot.press("e", "G")
+        assert app.parts[app.selected].label == "After."
+        await pilot.press("g")
+        assert app.parts[app.selected].label == "Flow"
+
+
+async def test_ctrl_d_and_ctrl_u_move_the_selection_half_a_screen(tmp_path):
+    long = "# Notes\n\n" + "".join(f"Paragraph {i}.\n\n" for i in range(40))
+    path = tmp_path / "long.md"
+    path.write_text(long, encoding="utf-8")
+    app = make_app(tmp_path)
+    async with app.run_test(size=(100, 24)) as pilot:
+        await pilot.pause()
+        await app.open_item(Item(kind="file", title="long.md", path=path))
+        await pilot.press("e", "ctrl+d")
+        body = app.query_one("#body")
+        moved = app.selected
+        assert 2 <= moved <= 8  # about half of a ~20-row screen, two rows a paragraph
+        await pilot.press("ctrl+d")
+        assert app.selected > moved and app.pointing
+        await pilot.press("ctrl+u", "ctrl+u")
+        assert app.selected == 0 and body.scroll_y == 0
+
+
 # --- diagrams inside a document ------------------------------------------------------
 
 async def test_j_walks_into_a_drawn_diagram_box_by_box_and_out_again(tmp_path):

@@ -526,7 +526,7 @@ class BlueprintApp(App[None]):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in ("point_ask", "point_done"):
             return self.pointing
-        if self.pointing and action in ("ask", "open_file", "pick_theme", "reload", "leave", "jump", "page"):
+        if self.pointing and action in ("ask", "open_file", "pick_theme", "reload", "leave"):
             return False  # point mode offers only its own keys
         # Hidden from the footer and the keys do nothing when there is no pane to use.
         if action == "ask":
@@ -1279,15 +1279,55 @@ class BlueprintApp(App[None]):
             target = min(boxes_of(target), key=place)
         self._select(target)
 
+    def _part_top(self, index: int) -> tuple[int, int]:
+        """Where a part starts on screen, (row, column); rows past the screen too."""
+        part = self.parts[index]
+        if self._part_widgets:
+            widget = self._part_widgets[index]
+            if part.boxes:
+                region = widget.query_one("#code-content").content_region
+                return region.y + part.boxes[0].y, region.x + part.boxes[0].x
+            return widget.region.y, widget.region.x
+        views = self.query(DiagramView)
+        if views and part.boxes:
+            region = views.first().content_region
+            return region.y + part.boxes[0].y, region.x + part.boxes[0].x
+        return 0, 0
+
+    def _point_jump(self, rows: int | None, end: bool = False) -> None:
+        """Select the first or last part (rows None), or the part about `rows` below or above."""
+        if self.query(NoteLine) or not self.parts:
+            return
+        tops = [self._part_top(i) for i in range(len(self.parts))]
+        if rows is None:
+            pick = max if end else min
+            self._select(pick(range(len(tops)), key=lambda i: (tops[i][0], -tops[i][1]) if end else tops[i]))
+            return
+        row = tops[self.selected][0] + rows
+        ahead = [i for i, (y, _x) in enumerate(tops) if (y >= row if rows > 0 else y <= row) and i != self.selected]
+        if not ahead:
+            self._point_jump(None, end=rows > 0)
+            return
+        nearest_row = min(abs(tops[i][0] - row) for i in ahead)
+        column = tops[self.selected][1]
+        self._select(min((i for i in ahead if abs(tops[i][0] - row) == nearest_row), key=lambda i: abs(tops[i][1] - column)))
+
     def action_page(self, direction: int) -> None:
-        """ctrl+d and ctrl+u: half a screen down or up, like vim."""
+        """ctrl+d and ctrl+u: half a screen down or up, like vim. In point mode, the selection moves."""
+        if self.pointing:
+            body = self.query_one("#body", VerticalScroll)
+            self._point_jump(direction * max(1, body.scrollable_content_region.height // 2))
+            return
         plain = self.query(PlainView)
         target = plain.first() if plain else self.query_one("#body", VerticalScroll)
         half = max(1, target.scrollable_content_region.height // 2)
         target.scroll_relative(y=direction * half, animate=False)
 
     def action_jump(self, end: bool) -> None:
-        """g to the top, G to the bottom."""
+        """g to the top, G to the bottom. In point mode, the first or last part."""
+        if self.pointing:
+            self._point_jump(None, end)
+            return
         plain = self.query(PlainView)
         target = plain.first() if plain else self.query_one("#body", VerticalScroll)
         if end:
