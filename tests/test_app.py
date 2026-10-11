@@ -802,3 +802,44 @@ async def test_a_drawn_diagram_keeps_its_drawing():
         view = app.query_one(DiagramView)
         await wait_for(pilot, lambda: view.drawing is not None)
         assert view.drawing.padding == (4, 2, 4)
+
+
+async def test_a_pressed_again_soon_asks_only_once(tmp_path):
+    import threading
+
+    release, asked = threading.Event(), []
+
+    def slow(source):
+        asked.append(source.pane_id)
+        release.wait(5)
+        return True, "Asked claude to draw"
+
+    app = start_app(Source("w1:p1", agent="claude", cwd=tmp_path), asker=slow)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("a", "a", "a")  # held down, or pressed while waiting
+        await wait_for(pilot, lambda: asked)
+        release.set()
+        await wait_for(pilot, lambda: app.notice == "Asked claude to draw")
+        await pilot.press("a")  # right after: the agent is already on it
+        await pilot.pause(0.3)
+        assert asked == ["w1:p1"]
+        app._asked_at -= 60  # a while later, a asks again
+        await pilot.press("a")
+        await wait_for(pilot, lambda: len(asked) == 2)
+
+
+async def test_a_can_try_again_right_after_a_failed_ask(tmp_path):
+    asked = []
+
+    def failing(source):
+        asked.append(source.pane_id)
+        return False, "claude is waiting for your answer"
+
+    app = start_app(Source("w1:p1", agent="claude", cwd=tmp_path), asker=failing)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await wait_for(pilot, lambda: app.notice == "claude is waiting for your answer")
+        await pilot.press("a")
+        await wait_for(pilot, lambda: len(asked) == 2)

@@ -68,6 +68,8 @@ SIDE_STEP = 4
 
 # Seconds between checks of the pane next to Blueprint (an agent may start or quit).
 NEIGHBOR_SECONDS = 5
+# Seconds after asking the agent to draw before `a` asks again: a held key sends once.
+ASK_COOLDOWN = 10
 # Unanswered checks in a row before the editor pane counts as closed by hand.
 PANE_MISSES = 2
 
@@ -339,6 +341,7 @@ class BlueprintApp(App[None]):
         self._opening = False  # herdr is opening the editor pane: sends and e wait for it
         self._auto_asked = not ask_on_open  # asked the neighbor to draw once, when Blueprint opened
         self._waiting_to_ask = False
+        self._asked_at = float("-inf")  # when `a` last asked (or the ask is still going)
         self.stale_files: list[str] = []  # code behind the drawing changed since it was sent
         self._live_timer = None
         self.preview_text: str | None = None  # what the live preview shows
@@ -605,9 +608,13 @@ class BlueprintApp(App[None]):
         self.action_ask()
 
     def action_ask(self) -> None:
-        """Ask the agent next to Blueprint to draw what it is doing."""
-        if self.source and self.source.agent:
-            self.run_worker(self._ask, thread=True, group="ask", exclusive=True)
+        """Ask the agent next to Blueprint to draw what it is doing, once in a while."""
+        if not (self.source and self.source.agent):
+            return
+        if time.time() - self._asked_at < ASK_COOLDOWN:
+            return  # just asked (a held key, or a second press): the agent is on it
+        self._asked_at = time.time()
+        self.run_worker(self._ask, thread=True, group="ask", exclusive=True)
 
     def _ask(self) -> None:
         assert self.source is not None
@@ -618,7 +625,12 @@ class BlueprintApp(App[None]):
             ok, message = self._asker(fresh)
         else:
             ok, message = False, f"{before.agent} is not in that pane anymore"
-        self.call_from_thread(self._show_notice, message, ok)
+        self.call_from_thread(self._asked, ok, message)
+
+    def _asked(self, ok: bool, message: str) -> None:
+        if not ok:
+            self._asked_at = float("-inf")  # nothing reached the agent: a may try again now
+        self._show_notice(message, ok)
 
     # The pane next to Blueprint --------------------------------------------
 
