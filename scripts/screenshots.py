@@ -19,6 +19,7 @@ from herdr_blueprint.item import Item
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "screenshots"
 FIXTURE = ROOT / "tests" / "fixtures" / "order-flow.md"
+DESIGN = ROOT / "tests" / "fixtures" / "token-design.md"
 async def drawings_done(app) -> None:
     # An empty list would mean "wait for every worker", including the endless inbox one.
     drawing = [worker for worker in app.workers if worker.group == "draw"]
@@ -36,9 +37,20 @@ async def open_picker(pilot) -> None:
     await pilot.press("t", "down")
 
 
-async def shoot(name: str, theme: str, action) -> None:
+async def point_and_ask(pilot) -> None:
+    """Point at "Code expired" in a design and type a note, ready to send."""
+    await pilot.app.open_item(Item(kind="file", title="docs/token-design.md", path=DESIGN, draw=True))
+    await drawings_done(pilot.app)
+    await pilot.pause(0.3)
+    await pilot.press("e")
+    app = pilot.app
+    app._select(next(i for i, part in enumerate(app.parts) if part.label == "Code expired"))
+    await pilot.press("enter", *"return 401 when the code expired")
+
+
+async def shoot(name: str, theme: str, action, size: tuple[int, int] = (76, 38)) -> None:
     app = BlueprintApp(settings=Config(theme=theme))
-    async with app.run_test(size=(76, 38)) as pilot:
+    async with app.run_test(size=size) as pilot:
         await pilot.pause(0.3)
         await action(pilot)
         await pilot.pause(0.3)
@@ -52,6 +64,7 @@ async def main() -> None:
     await shoot("document", "rose-pine", open_fixture)
     await shoot("blueprint-theme", "blueprint", open_fixture)
     await shoot("theme-picker", "rose-pine", open_picker)
+    await shoot("point-and-ask", "rose-pine", point_and_ask, size=(76, 46))
 
 
 if __name__ == "__main__":

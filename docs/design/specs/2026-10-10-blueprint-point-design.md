@@ -55,10 +55,11 @@ and path, the participant's box, the message's label and arrow rows, or the
 document block's background. Moving the selection scrolls it into view, sideways
 too.
 
-Moving follows the screen and the arrows (added 2026-10-11): sideways reaches
-parts on the same rows, up and down parts in the same columns, and parts an
-arrow joins to the current one count wherever they are. A branch is measured
-from its last run into its target. In a document, `j` and `k` walk the blocks
+Moving follows the screen and the arrows (added 2026-10-11): a part counts only
+if it lies wholly beyond the current one in that direction; sideways reaches
+parts on the same rows, up and down parts in the same columns or else the
+nearest part on the next row, and parts an arrow joins to the current one count
+wherever they are. A branch is measured from its last run into its target. In a document, `j` and `k` walk the blocks
 and step into a drawn diagram; going past its top or bottom leaves it. `g`/`G`
 pick the first/last part and `ctrl+d`/`ctrl+u` move half a screen.
 

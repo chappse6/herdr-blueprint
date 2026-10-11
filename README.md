@@ -26,9 +26,16 @@ agent and it shows one thing: the latest doc or diagram the agent sent, drawn
 in your terminal with colors that match your theme.
 
 - **One screen.** Each send replaces what is shown. Nothing piles up.
+- **Point and ask.** Press `e`, pick a box, a branch or a block, and say what
+  should change: the agent next to Blueprint gets the part, its place in the
+  source and your note.
+- **Work orders on code.** When the agent ties boxes to its code, your note
+  becomes a change to that code: made, tested, and drawn again.
+- **Kept current.** With the skill, the agent redraws the code it is building
+  after each unit of work, while Blueprint is open.
 - **Draw on request.** Mermaid is drawn with [termaid](https://github.com/fasouto/termaid)
-  when the sender adds `--draw`; otherwise it stays as clean text.
-- **Refresh on request.** The agent (or `r`) redraws what is on screen.
+  when the sender adds `--draw`; otherwise it stays as clean text. The agent
+  (or `r`) redraws what is on screen.
 - **Knows its neighbor.** Opened next to an agent, it shows the agent, its task
   and folder. Press `a` to ask the agent to draw its task, or `o` to open a doc
   from that folder.
@@ -77,7 +84,9 @@ description = "open Blueprint"
 | `h` `j` `k` `l` | Move left, down, up, right |
 | `g` `G` | Top, bottom (pointing: first, last part) |
 | `ctrl+d` `ctrl+u` | Half a page down, up (pointing: the selection moves) |
-| `e` | Point at a part to ask about it (then `e` again edits the text) |
+| `e` | Point at a part (pointing: edit the text at it) |
+| `Enter` | Pointing: write a note about the part and send it |
+| `Esc` | Pointing: close the note, then stop pointing |
 | `a` | Ask the agent next to Blueprint to draw its task |
 | `o` | Open a Markdown or Mermaid file from that pane's folder |
 | `t` | Change theme |
@@ -92,11 +101,17 @@ diagram, a participant or message in a sequence diagram, a heading, paragraph,
 list or table in a document. A diagram drawn inside a document is pointed at
 box by box too: `j` and `k` walk the document and step into it, `h` `j` `k` `l`
 move between its boxes, and going past its top or bottom leaves it. Click a
-part to select it. Press Enter, say what should change, and press Enter again:
-the agent next to Blueprint gets the part, where it is in the source and your
-note. Esc steps back. While you type a note, whatever the agent sends waits
+part to select it. Moving follows the screen: `h` and `l` reach what is on the
+same rows, `j` and `k` what is in the same columns (else the next row), and an
+arrow leads to what it joins. Press Enter, say what should change, and press
+Enter again: the agent next to Blueprint gets the part, where it is in the
+source and your note. Esc steps back. While you type a note, whatever the agent sends waits
 until you close it, and a note you keep moves to the next version of the same
 diagram.
+
+<p align="center">
+  <img src="docs/screenshots/point-and-ask.png" width="60%" alt="A design of a token endpoint with the box Code expired selected and the note: return 401 when the code expired">
+</p>
 
 When the agent draws the code it is building, it ties each box to that code
 with a comment Blueprint doesn't draw:
@@ -135,6 +150,7 @@ away.
 herdr-blueprint show docs/design.md               # a file
 printf 'graph LR\n  A --> B\n' | herdr-blueprint send --draw --title "Flow"
 herdr-blueprint refresh --draw                    # redraw what is shown
+herdr-blueprint status                            # open or closed
 ```
 
 `--draw` makes Blueprint draw Mermaid. Without it, diagrams show as text, which
@@ -148,7 +164,8 @@ root=$(herdr plugin list --plugin seeun.blueprint --json | uv run --no-project -
 uv run --project "$root" --no-sync python -m herdr_blueprint send --draw --title "Flow" < flow.mmd
 ```
 
-Teach Claude Code and Codex to send diagrams on their own:
+Teach Claude Code and Codex to use Blueprint on their own: draw what they are
+building, keep it current, and act on what you point at or edit:
 
     herdr plugin action invoke seeun.blueprint.install-skill
 
