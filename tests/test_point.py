@@ -202,7 +202,7 @@ def test_descriptions():
 
 def test_a_quoted_line_with_backticks_stays_one_span():
     text = point.point_prompt("the diagram block", "x", lines=(7, 17), line_text="```mermaid", file_label="a.md")
-    assert "lines 7-17: `` ```mermaid ``." in text
+    assert "lines 7-17: ```` ```mermaid ````." in text
 
 
 def test_parts_of_a_diagram_in_a_document_carry_their_place():
@@ -432,3 +432,49 @@ def test_a_graph_termaid_cannot_split_has_no_parts(monkeypatch):
 
     monkeypatch.setattr("termaid.parser.flowchart.parse_flowchart", unparseable)
     assert point.diagram_parts(FLOW, (4, 2, 4), draw(FLOW)) == []
+
+
+def test_message_lines_skip_notes_titles_and_aliases():
+    src = (
+        "sequenceDiagram\n  title Login -> flow\n  participant S as Auth-xyz\n  participant B\n"
+        "  Note over B,S: B -> S handshake\n  B->>S: login\n  S-->>B: ok\n  B->>S: login\n"
+    )
+    parts = point.diagram_parts(src, (4, 2, 4), draw(src))
+    assert [(p.label, p.lines) for p in parts if p.kind == "message"] == [
+        ("login", (6, 6)), ("ok", (7, 7)), ("login", (8, 8)),
+    ]
+
+
+def test_actors_and_their_neighbours_can_be_pointed_at():
+    src = "sequenceDiagram\n  actor U as User\n  participant S\n  U->>S: hi\n"
+    text = draw(src)
+    parts = point.diagram_parts(src, (4, 2, 4), text)
+    assert [(p.kind, p.label) for p in parts] == [("participant", "User"), ("participant", "S"), ("message", "hi")]
+    assert_on_corners(text, parts[1])  # the box sits at the bottom of a taller header
+
+
+def test_a_hexagon_does_not_hide_the_other_boxes():
+    src = "graph LR\n  A{{Hexagon}} --> B[Next]\n"
+    assert [p.label for p in point.diagram_parts(src, (4, 2, 4), draw(src))] == ["Hexagon", "Next"]
+
+
+def test_node_lines_ignore_edge_labels_front_matter_and_one_line_headers():
+    labelled = "graph LR\n  A[Start] -->|B (maybe)| C[End]\n  B[Middle] --> C\n"
+    lines = {p.id: p.lines for p in point.diagram_parts(labelled, (4, 2, 4), draw(labelled))}
+    assert lines["B"] == (3, 3)
+    front = "---\ntitle: Login (v2)\n---\ngraph LR\n  Login[Login] --> X[Next]\n"
+    lines = {p.id: p.lines for p in point.diagram_parts(front, (4, 2, 4), draw(front))}
+    assert lines["Login"] == (5, 5)
+    one = "graph LR; A[One] --> B[Two]\n"
+    lines = {p.id: p.lines for p in point.diagram_parts(one, (4, 2, 4), draw(one))}
+    assert lines == {"A": (1, 1), "B": (1, 1)}
+
+
+def test_labels_are_one_line_of_plain_text():
+    src = 'graph TD\n  A["This is a really<br/>long label"] --> B[Two]\n'
+    assert point.diagram_parts(src, (4, 2, 4), draw(src))[0].label == "This is a really long label"
+
+
+def test_a_quoted_line_keeps_its_backticks():
+    text = point.point_prompt("the box", "x", lines=(3, 3), line_text="a ``b`` c", file_label="a.md")
+    assert "line 3: ``` a ``b`` c ```." in text

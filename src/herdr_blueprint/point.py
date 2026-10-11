@@ -18,8 +18,6 @@ from rich.text import Text
 
 # `%% code: <id> <where>`: a Mermaid comment tying a box to the code it stands for.
 _CODE_LINE = re.compile(r"^[ \t]*%%[ \t]*code:[ \t]*(\S+)[ \t]+(\S.*?)[ \t]*$", re.MULTILINE)
-# Message arrows in a sequence diagram source line.
-_ARROW = re.compile(r"^\s*[^%].*?(-{1,2}>>|-{1,2}>|-{1,2}x|-{1,2}\))")
 
 
 @dataclass(frozen=True)
@@ -51,6 +49,7 @@ class Part:
     code: str = ""  # the code it stands for, from a `%% code:` line
     anchor: tuple[float, float] | None = None  # where moving measures from, if not the first box
     joined: frozenset[str] = frozenset()  # ids an arrow joins it to (a box's neighbours, a message's participants)
+    boxed: bool = True  # drawn as a box with corners (an actor's stick figure isn't): checked against the drawing
 
 
 # --- diagrams ----------------------------------------------------------------------
@@ -59,6 +58,12 @@ class Part:
 def code_links(source: str) -> dict[str, str]:
     """Box id -> the code it stands for, from the diagram's `%% code:` lines."""
     return {found.group(1): found.group(2) for found in _CODE_LINE.finditer(source)}
+
+
+def _plain(label: str) -> str:
+    """A label as one line of text: termaid's wrap marks and <br/> become spaces."""
+    label = re.sub(r"<br\s*/?>", " ", label.replace("\\n", " ").replace("\n", " "), flags=re.IGNORECASE)
+    return " ".join(label.split())
 
 
 def _strip(source: str) -> str:
@@ -150,7 +155,7 @@ def _graph_parts(graph, padding: tuple[int, int, int], source: str) -> list[Part
             box = replace(box, x=width - box.x - box.width)
         if flip_v:
             box = replace(box, y=height - box.y - box.height)
-        label = getattr(graph.nodes[node_id], "label", "") or node_id
+        label = _plain(getattr(graph.nodes[node_id], "label", "") or node_id)
         line = _node_line(lines, node_id)
         parts.append(Part(
             "node", node_id, label, (box,), (line, line) if line else None,
@@ -242,24 +247,62 @@ def _sequence_parts(stripped: str, padding: tuple[int, int, int], source: str) -
     label_of = {p.id: p.label or p.id for p in diagram.participants}
     parts = []
     for i, participant in enumerate(diagram.participants):
-        box = Box(centers[i] - widths[i] // 2, 0, widths[i], header)
+        # A plain participant is a 3-row box at the bottom of the header; an actor,
+        # database... is a 5-row shape there, with no corners to check.
+        plain = getattr(participant, "kind", "participant") == "participant"
+        height = 3 if plain else min(5, header)
+        box = Box(centers[i] - widths[i] // 2, header - height, widths[i], height)
         line = _participant_line(lines, participant.id)
-        parts.append(Part("participant", participant.id, label_of[participant.id], (box,), (line, line) if line else None))
-    message_lines = [n for n, text in enumerate(lines, 1) if _ARROW.match(text)]
-    count = 0
+        parts.append(Part(
+            "participant", participant.id, _plain(label_of[participant.id]), (box,), (line, line) if line else None,
+            boxed=plain,
+        ))
+    count, cursor = 0, 1
     for event, row in zip(flat, rows):
         if type(event).__name__ != "Message":
             continue
         left, right = sorted((centers[index[event.source]], centers[index[event.target]]))
         box = Box(left, row - 1, max(right - left, 6) + 1, 2)
-        line = message_lines[count] if count < len(message_lines) else None
+        line = _message_line(lines, event.source, event.target, cursor)
+        cursor = line + 1 if line else cursor
         count += 1
         detail = f"from {label_of[event.source]} to {label_of[event.target]}"
         parts.append(Part(
-            "message", f"message-{count}", event.label, (box,), (line, line) if line else None, detail,
+            "message", f"message-{count}", _plain(event.label), (box,), (line, line) if line else None, detail,
             joined=frozenset((event.source, event.target)),
         ))
     return parts
+
+
+def _message_line(lines: list[str], source_id: str, target_id: str, start: int) -> int | None:
+    """The first line from `start` (1-based) with a message arrow from `source_id` to `target_id`."""
+    arrow = re.compile(
+        rf"^\s*{re.escape(source_id)}\s*(<<)?-{{1,2}}(>>|>|x|\))\s*[+-]?\s*{re.escape(target_id)}\s*:"
+    )
+    for number in range(start, len(lines) + 1):
+        if arrow.match(lines[number - 1]):
+            return number
+    return None
+
+
+def _diagram_lines(lines: list[str]) -> list[tuple[int, str]]:
+    """(number, text) of the lines a node can be defined on: after front matter, without
+    edge labels and quoted text, and the header line's rest (`graph LR; A --> B`)."""
+    start = 0
+    if lines and lines[0].strip() == "---":
+        closing = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+        start = closing + 1 if closing is not None else 0
+    found = []
+    for number in range(start + 1, len(lines) + 1):
+        text = lines[number - 1]
+        if number == start + 1:
+            # The header: only what follows `graph LR;` can hold nodes.
+            text = re.sub(r"^\s*\S+(\s+[A-Za-z]{2})?\s*;?", "", text, count=1) if ";" in text else ""
+        if text.lstrip().startswith("%%"):
+            continue
+        text = re.sub(r"\|[^|]*\||\"[^\"]*\"", lambda m: " " * len(m.group()), text)
+        found.append((number, text))
+    return found
 
 
 def _node_line(lines: list[str], node_id: str) -> int | None:
@@ -269,8 +312,9 @@ def _node_line(lines: list[str], node_id: str) -> int | None:
         rf"^\s*state\s+{word}\b|^\s*{word}\s*:",  # state diagrams
         rf"(^|\W){word}(\W|$)",  # used anywhere
     )
+    candidates = _diagram_lines(lines)
     for pattern in patterns:
-        for number, text in enumerate(lines[1:], 2):
+        for number, text in candidates:
             if re.search(pattern, text):
                 return number
     return None
@@ -314,12 +358,19 @@ def _aligned(parts: list[Part], text: Text) -> list[Part]:
     tests), not as boxes moved onto whatever is nearby.
     """
     rows = text.plain.split("\n")
-    boxed = [box for part in parts if part.kind in ("node", "participant") for box in part.boxes]
-    fits = all(
-        _char_at(rows, b.x, b.y) != " " and _char_at(rows, b.x + b.width - 1, b.y + b.height - 1) != " "
-        for b in boxed
-    )
-    return parts if fits else []
+    boxed = [box for part in parts if part.kind in ("node", "participant") and part.boxed for box in part.boxes]
+
+    def drawn(x: int, y: int) -> bool:
+        return _char_at(rows, x, y) != " "
+
+    def fits(b: Box) -> bool:
+        right, bottom = b.x + b.width - 1, b.y + b.height - 1
+        if drawn(b.x, b.y) and drawn(right, bottom):
+            return True
+        # A hexagon's corners are cut: one cell in, and the middle of its left side.
+        return drawn(b.x + 1, b.y) and drawn(right - 1, bottom) and drawn(b.x, b.y + b.height // 2)
+
+    return parts if all(fits(b) for b in boxed) else []
 
 
 # --- documents ------------------------------------------------------------------------
@@ -495,7 +546,10 @@ def _where(lines: tuple[int, int] | None, line_text: str) -> str:
     text = line_text.strip()
     if not text:
         return f", {span}"
-    return f", {span}: `` {text} ``" if "`" in text else f", {span}: `{text}`"
+    if "`" not in text:
+        return f", {span}: `{text}`"
+    fence = "`" * (max(len(run) for run in re.findall(r"`+", text)) + 1)  # longer than any run inside
+    return f", {span}: {fence} {text} {fence}"
 
 
 def point_prompt(
