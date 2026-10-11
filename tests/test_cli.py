@@ -230,3 +230,16 @@ def test_the_viewer_keeps_the_pane_id_when_herdr_did_not_answer(monkeypatch):
     monkeypatch.delenv("HERDR_PANE_ID", raising=False)
     assert cli.main([]) == 0
     assert seen["source"] == pane.Source("w1:p1")
+
+
+def test_status_says_whether_a_viewer_is_open(monkeypatch, capsys):
+    # Agents check this before drawing, so a closed Blueprint costs no tokens.
+    alive = {"w1:pV"}
+    monkeypatch.setattr("herdr_blueprint.sources.pane.pane_exists", lambda herdr, pane_id: pane_id in alive)
+    assert cli.main(["status"]) == 1
+    assert capsys.readouterr().out.strip() == "closed"
+    inbox.mark_viewer("w1:pV")
+    assert cli.main(["status"]) == 0
+    assert capsys.readouterr().out.strip() == "open"
+    alive.clear()  # closed without cleanup
+    assert cli.main(["status"]) == 1

@@ -75,8 +75,8 @@ description = "open Blueprint"
 | Key | Action |
 |---|---|
 | `h` `j` `k` `l` | Move left, down, up, right |
-| `g` `G` | Top, bottom |
-| `ctrl+d` `ctrl+u` | Half a page down, up |
+| `g` `G` | Top, bottom (pointing: first, last part) |
+| `ctrl+d` `ctrl+u` | Half a page down, up (pointing: the selection moves) |
 | `e` | Point at a part to ask about it (then `e` again edits the text) |
 | `a` | Ask the agent next to Blueprint to draw its task |
 | `o` | Open a Markdown or Mermaid file from that pane's folder |
@@ -86,23 +86,45 @@ description = "open Blueprint"
 
 ## Point and ask
 
-Press `e` and the first part of what Blueprint shows is selected: a box in a
-flowchart or state diagram, a participant or message in a sequence diagram, a
-heading, paragraph, list or table in a document (other diagrams as a whole).
-Move with `h` `j` `k` `l` or click a part. Press Enter, say what should change,
-and press Enter again: the agent next to Blueprint gets the part, where it is in
-the source and your note, changes it, and sends the result back. Esc steps back.
+Press `e` and the first part of what Blueprint shows is selected: a box or a
+branch (a labelled arrow, or an arm of a choice) in a flowchart or state
+diagram, a participant or message in a sequence diagram, a heading, paragraph,
+list or table in a document. A diagram drawn inside a document is pointed at
+box by box too: `j` and `k` walk the document and step into it, `h` `j` `k` `l`
+move between its boxes, and going past its top or bottom leaves it. Click a
+part to select it. Press Enter, say what should change, and press Enter again:
+the agent next to Blueprint gets the part, where it is in the source and your
+note. Esc steps back.
+
+When the agent draws the code it is building, it ties each box to that code
+with a comment Blueprint doesn't draw:
+
+```
+flowchart TD
+  T[POST /token] --> V{PKCE valid}
+  V -->|no| E[400 invalid_grant]
+  V -->|yes| I[Issue tokens]
+  %% code: V src/auth/pkce.ts:10
+```
+
+Point at such a box (or one of its branches), write "return 401 when the code
+expired", and the request is a work order: the agent changes the code at
+`src/auth/pkce.ts:10`, runs the tests, and redraws the design.
 
 To change the text yourself, press `e` again while pointing. Your editor
-(`$VISUAL`, `$EDITOR`, else vim, vi or nano) opens on that line, in a pane below
-Blueprint inside herdr, and every save redraws the drawing above. Save and quit
-(`:wq`) and the change goes to the agent as a diff; quit without saving (`:q!`)
+(`$BLUEPRINT_EDITOR`, `$VISUAL`, `$EDITOR`, else vim, vi or nano) opens on that
+line, in a pane below Blueprint inside herdr, and every save redraws the drawing
+above. Save and quit (`:wq`) and the change goes to the agent: a diff for a
+file, the new version for something the agent sent. Quit without saving (`:q!`)
 and nothing happens. Blueprint never writes the file itself: the agent applies
-the change, and you roll it back the way you roll back any agent change.
+the change, and you roll it back the way you roll back any agent change. Set
+`BLUEPRINT_EDITOR` when your `$EDITOR` is set up for something else, such as an
+editor that starts in insert mode.
 
-With no agent there but a shell, Blueprint offers to start one. A note or an
-edit that could not be sent is kept for that document: point again (or press
-`e` twice) to pick it up, or save an edit empty to throw it away.
+With no agent there but a shell, Blueprint offers to start one. A note that
+could not be sent is kept for that part; an edit, for that document. Point
+again (or press `e` twice) to pick it up, or save an edit empty to throw it
+away.
 
 ## Send things from an agent
 
@@ -130,6 +152,28 @@ Teach Claude Code and Codex to send diagrams on their own:
 This links `skills/blueprint` into `~/.claude/skills` and `~/.agents/skills`
 (a copy on Windows when symlinks are not allowed). Start a new agent session
 to pick it up. Undo with `herdr-blueprint uninstall-skill`.
+
+## Token use
+
+Blueprint itself uses no tokens; the agent does when it writes what Blueprint
+shows. With the skill installed, the agent redraws its design after each unit
+of work (a feature piece, a fix, a change to the flow), but only while
+Blueprint is open: it first runs `status`, a short command, and draws nothing
+when Blueprint is closed.
+
+Rough figures, not measurements (they vary with the model, the language and the
+size of the diagram):
+
+| What | Tokens |
+|---|---|
+| One redraw: a summary, a diagram of 10 to 20 boxes, its `%% code:` lines | about 0.5k to 1.5k written; text in languages other than English takes more |
+| The check when Blueprint is closed | well under 100 |
+| An hour with ten units of work | about 5k to 15k written |
+
+Each redraw is also one more step for the agent, which reads its conversation
+again; prompt caching makes that cheap, but it counts toward usage limits. To
+use fewer tokens, close Blueprint while you don't look at it, or tell the agent
+to redraw only when you press `a`.
 
 ## Themes
 

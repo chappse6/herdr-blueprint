@@ -85,6 +85,7 @@ def _parser() -> argparse.ArgumentParser:
     refresh = commands.add_parser("refresh", help="re-read and redraw what the viewer shows")
     refresh.add_argument("--draw", action="store_true", help=DRAW_HELP)
     commands.add_parser("open", help="open the viewer pane in herdr")
+    commands.add_parser("status", help="print open or closed: whether a viewer is open (exit 0 when open)")
     commands.add_parser("edit-session", help=argparse.SUPPRESS)
     commands.add_parser("install-skill", help="add the Blueprint skill to Claude Code and Codex")
     commands.add_parser("uninstall-skill", help="remove the Blueprint skill")
@@ -125,6 +126,12 @@ def main(argv: list[str] | None = None) -> int:
         inbox.send({"kind": "refresh", "draw": args.draw})
         print("Asked Blueprint to refresh")
         return 0
+
+    if args.command == "status":
+        herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
+        viewing = any(pane.pane_exists(herdr, pane_id) for pane_id in inbox.viewer_panes())
+        print("open" if viewing else "closed")
+        return 0 if viewing else 1
 
     if args.command in ("install-skill", "uninstall-skill"):
         from . import skills_install

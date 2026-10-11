@@ -40,6 +40,9 @@ blueprint_cli show docs/design.md
 
 # You changed the file on screen: redraw it in place
 blueprint_cli refresh --draw
+
+# Is a Blueprint viewer open? Prints open or closed (exit 0 when open)
+blueprint_cli status
 ```
 
 Empty `$root` means the plugin is not installed: tell the user to run
@@ -55,10 +58,17 @@ Empty `$root` means the plugin is not installed: tell the user to run
 ## When the user pointed at something in Blueprint
 
 The prompt starts with "In Blueprint I pointed at ..." and names the part (a
-box, participant, message, heading, table...), where it is (file and line, or
-the source of something you sent) and what the user wants. Change that part
-and anything it describes, then show the result in Blueprint again: `show` the
-file, or `send` the new version, with `--draw` when the point is the picture.
+box, branch, participant, message, heading, table...), where it is (file and
+line, or the source of something you sent) and what the user wants.
+
+- If it says "It stands for `path:line`", it is a work order on that code: read
+  the code there, make the change the note asks for and anything that depends
+  on it, and run the tests. Then redraw the design so it shows the change, with
+  its `%% code:` lines updated, and send it.
+- Otherwise change that part and anything it describes, then show the result in
+  Blueprint again: `show` the file, or `send` the new version.
+
+Use `--draw` when the point is the picture.
 
 ## When the user edited something in Blueprint
 
@@ -66,7 +76,9 @@ The prompt starts with "I edited ... in Blueprint" and holds a diff (for a
 file) or the new version (for something you sent). A long one is in a file the
 prompt names; read it right away, it is deleted when Blueprint closes. Apply it: change the file
 and anything that depends on it. If the prompt says the file changed on disk,
-read the file first instead of applying the diff blindly. Then show the result
+read the file first instead of applying the diff blindly. If the prompt
+mentions `%% code:` lines, the diagram is a design tied to code: make the change
+in that code, run the tests, then send the updated design. Then show the result
 in Blueprint again: `show` the file, or `send` the new version, with `--draw`
 when the point of it is the picture.
 
@@ -77,7 +89,45 @@ so send Markdown with `--draw`, in the user's language:
 
 1. A `#` heading with the task.
 2. Two to four short lines: the goal, what is done, what you are doing now.
-3. A `mermaid` fence with the flow or structure you are working on.
+   Progress goes here, not in the diagram.
+3. A `mermaid` fence with the code you are building: how it flows, where it
+   branches (a `{choice}` with labelled arms), or how its parts fit. Not the
+   steps of your task: the user points at this picture to ask for changes to
+   the code, so every box should be a piece of it.
+4. A `%% code:` line for every box (see "Tie boxes to code").
+
+## Keep the picture current
+
+When you finish a unit of work (a feature piece, a fix, a change to the flow)
+and before you report it in chat:
+
+1. Run `blueprint_cli status`. If it prints `closed`, stop here: no drawing.
+2. Send the same note as "what you are working on", updated. Start from your
+   last diagram and change only what changed.
+
+Once per unit of work, not per edit. Skip it when the flow didn't change
+(typos, comments, tests only).
+
+## Tie boxes to code
+
+Add a Mermaid comment for each box: `%% code: <node id> <path>:<line>`, with a
+path relative to the repo. It doesn't show in the drawing; when the user points
+at the box, Blueprint sends that location with the request.
+
+```
+flowchart TD
+  T[POST /token] --> V{PKCE valid}
+  V -->|no| E[400 invalid_grant]
+  V -->|yes| I[Issue tokens]
+  %% code: T src/routes/token.ts:20
+  %% code: V src/auth/pkce.ts:10
+  %% code: I src/auth/tokens.ts:31
+```
+
+- A labelled arrow is a branch the user can point at; without its own line it
+  stands for its branch node's code. Give it one (`%% code: V->E path:line`)
+  when that branch lives somewhere else.
+- Only locations you have seen. Leave a box without a line rather than guess.
 
 ## When asked to explain a feature
 
@@ -87,7 +137,7 @@ Markdown with `--draw`, in the user's language:
 1. A `#` heading naming the feature.
 2. Two or three lines: what it does and the one idea that makes it work.
 3. A `mermaid` fence: `sequenceDiagram` for a flow between parts, `flowchart`
-   for structure or decisions.
+   for structure or decisions, with `%% code:` lines for its boxes.
 4. A table of the steps: `file:line` and the key point of each.
 
 ## Writing diagrams
