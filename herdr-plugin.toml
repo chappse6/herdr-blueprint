@@ -1,6 +1,6 @@
 id = "seeun.blueprint"
 name = "Blueprint"
-version = "0.6.1"
+version = "0.6.2"
 min_herdr_version = "0.9.3"
 description = "Your coding agent explains its work as diagrams, right next to the chat."
 platforms = ["macos", "linux", "windows"]
