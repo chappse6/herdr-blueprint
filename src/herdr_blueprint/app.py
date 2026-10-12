@@ -837,7 +837,11 @@ class BlueprintApp(App[None]):
             return
         live = LiveEdit(item, kept, base, base_bytes, folder, copy, (stat.st_mtime_ns, stat.st_size), pane_id, asyncio.Event())
         self._live = live
-        self._show_notice(f"Editing {name}: save to preview, quit to finish", ok=True)
+        if edit.is_window_editor(command):
+            # Notepad opens its own window; the pane below stays empty.
+            self._show_notice(f"Editing {name} in Notepad (set BLUEPRINT_EDITOR for a terminal editor)", ok=True)
+        else:
+            self._show_notice(f"Editing {name}: save to preview, quit to finish", ok=True)
         self.run_worker(self._watch_live(live), group="live", exit_on_error=False)
         self._live_timer = self.set_interval(2, self._check_live_pane)
         self.refresh_bindings()
@@ -1353,7 +1357,7 @@ class BlueprintApp(App[None]):
         folder = self.source.cwd if self.source and self.source.cwd else Path.cwd()
         path = folder / name
         if not path.is_file():
-            self._show_notice(f"Cannot find {clean(name)}")
+            self._show_notice(f"Cannot find {clean(name)} in {pane.short_folder(folder)}")
             return
         try:
             command = self._find_editor()

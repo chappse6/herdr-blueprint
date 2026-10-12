@@ -18,7 +18,8 @@ def test_editor_prefers_visual_then_editor_then_path():
         "/usr/bin/nvim", "-u", "x",
     ]
     assert edit.editor_command({"EDITOR": "hx"}, which=which, system="posix") == ["/usr/bin/hx"]
-    assert edit.editor_command({}, which=which, system="posix") == ["/usr/bin/vim"]
+    assert edit.editor_command({}, which=which, system="posix") == ["/usr/bin/nvim"]  # nvim first
+    assert edit.editor_command({}, which=which_only("vim", "nano"), system="posix") == ["/usr/bin/vim"]
     assert edit.editor_command({}, which=which_only("nano"), system="posix") == ["/usr/bin/nano"]
 
 
@@ -279,3 +280,11 @@ def test_the_session_can_write_its_exit_code_elsewhere(tmp_path):
     }
     assert edit.run_session(env, run=lambda command: subprocess.CompletedProcess(command, 0)) == 0
     assert elsewhere.read_text() == "0" and sorted(p.name for p in code_file.parent.iterdir()) == ["a.py"]
+
+
+def test_nvim_is_found_on_windows_before_notepad():
+    # Reported: with nvim installed and no $EDITOR, Windows got Notepad in its own window.
+    which = which_only("nvim", "notepad")
+    assert edit.editor_command({}, which=which, system="nt") == ["/usr/bin/nvim"]
+    assert edit.editor_command({}, which=which_only("notepad"), system="nt") == ["/usr/bin/notepad"]
+    assert edit.is_window_editor(["C:\\Windows\\notepad.exe"]) and not edit.is_window_editor(["nvim"])

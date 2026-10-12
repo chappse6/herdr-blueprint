@@ -44,6 +44,11 @@ class EditorError(Exception):
     """The editor setting can't be used; the message says why."""
 
 
+def is_window_editor(command: list[str]) -> bool:
+    """An editor that opens its own window instead of running in the terminal pane."""
+    return bool(command) and _program(command[0]) == "notepad"
+
+
 def _program(path: str) -> str:
     name = Path(path.replace("\\", "/")).name.lower()
     return name.rsplit(".", 1)[0] if name.endswith((".exe", ".cmd", ".bat")) else name
@@ -55,7 +60,7 @@ def editor_command(
     which: Callable[[str], str | None] = shutil.which,
     system: str | None = None,
 ) -> list[str] | None:
-    """$BLUEPRINT_EDITOR, else $VISUAL, else $EDITOR, else vim, vi, nano; notepad last on Windows.
+    """$BLUEPRINT_EDITOR, else $VISUAL, else $EDITOR, else nvim, vim, vi, nano; notepad last on Windows.
 
     None when nothing is set and nothing is installed. EditorError when the
     setting can't be parsed or names a program that isn't there: starting it
@@ -76,7 +81,7 @@ def editor_command(
             command = [part.strip('"').strip("'") for part in parts if part.strip('"').strip("'")]
             break
     if not command:
-        fallbacks = ("vim", "vi", "nano", "notepad") if system == "nt" else ("vim", "vi", "nano")
+        fallbacks = ("nvim", "vim", "vi", "nano", "notepad") if system == "nt" else ("nvim", "vim", "vi", "nano")
         found = next((path for name in fallbacks if (path := which(name))), None)
         if found is None:
             return None

@@ -74,12 +74,12 @@ class FakePrompter:
         return True, "Sent to claude"
 
 
-def make_app(tmp_path, fake, prompter=None, editor=None):
+def make_app(tmp_path, fake, prompter=None, editor=None, find_editor=None):
     source = Source("w1:p1", agent="claude", cwd=tmp_path)
     return BlueprintApp(
         ask_on_open=False, settings=Config(theme="rose-pine"), source=source, refresher=lambda pane_id: source,
         prompter=prompter or FakePrompter(), editor=editor or (lambda command: 0),
-        find_editor=lambda: ["/usr/bin/nvim"], idle_shell=lambda pane_id: False, kinds=lambda: [],
+        find_editor=find_editor or (lambda: ["/usr/bin/nvim"]), idle_shell=lambda pane_id: False, kinds=lambda: [],
         pane_editor=fake.open, focus_pane=fake.focus, pane_alive=fake.exists,
     )
 
@@ -390,3 +390,13 @@ async def test_quitting_mid_edit_leaves_the_copy_for_the_editor(tmp_path):
         await start_editing(app, pilot, doc(tmp_path), fake)
         copy = fake.copy
     assert copy.exists()  # the editor in its pane can still save
+
+
+async def test_notepad_says_how_to_get_a_terminal_editor(tmp_path):
+    fake = FakePane()
+    app = make_app(tmp_path, fake, find_editor=lambda: ["C:\\Windows\\notepad.exe"])
+    async with app.run_test(size=(140, 30)) as pilot:
+        await pilot.pause()
+        await start_editing(app, pilot, doc(tmp_path), fake)
+        await wait_for(pilot, lambda: app.editing)
+        assert "Notepad" in app.notice and "BLUEPRINT_EDITOR" in app.notice

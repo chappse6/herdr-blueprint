@@ -634,4 +634,5 @@ async def test_c_says_when_the_code_is_not_there(tmp_path):
         await pilot.pause()
         await open_drawn(app, pilot, flow_file(tmp_path, FLOW + "  %% code: B src/gone.py:3\n"))
         await pilot.press("e", "l", "c")
-        assert app.notice == "Cannot find src/gone.py"
+        assert app.notice == f"Cannot find src/gone.py in {tmp_path.name}" or app.notice.startswith("Cannot find src/gone.py in ")
+        assert tmp_path.name in app.notice  # where it looked

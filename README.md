@@ -156,7 +156,8 @@ expired", and the request is a work order: the agent changes the code at
 yourself, press `c`: it opens in your editor at that line.
 
 To change the text yourself, press `e` again while pointing. Your editor
-(`$BLUEPRINT_EDITOR`, `$VISUAL`, `$EDITOR`, else vim, vi or nano) opens on that
+(`$BLUEPRINT_EDITOR`, `$VISUAL`, `$EDITOR`, else nvim, vim, vi or nano, and
+Notepad last on Windows) opens on that
 line, in a pane below Blueprint inside herdr, and every save redraws the drawing
 above. Save and quit (`:wq`) and the change goes to the agent: a diff for a
 file, the new version for something the agent sent. Quit without saving (`:q!`)

@@ -114,7 +114,8 @@ Once per unit of work, not per edit. Skip it when the flow didn't change
 ## Tie boxes to code
 
 Add a Mermaid comment for each box: `%% code: <node id> <path>:<line>`, with a
-path relative to the repo. It doesn't show in the drawing; when the user points
+path relative to your working folder (where your commands run), or absolute;
+Blueprint opens it from there. It doesn't show in the drawing; when the user points
 at the box, Blueprint sends that location with the request.
 
 Put them at the end of the diagram (termaid reads the diagram type from the
